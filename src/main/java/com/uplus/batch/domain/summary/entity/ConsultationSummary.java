@@ -38,7 +38,7 @@ public class ConsultationSummary {
   private List<String> riskFlags;
   private Customer customer;
   private Cancellation cancellation;
-  private ResultProducts resultProducts;
+  private List<ResultProducts> resultProducts;
   private LocalDateTime createdAt;
 
   // ================= Embedded =================
@@ -81,7 +81,7 @@ public class ConsultationSummary {
     private String name;
     private String ageGroup;
     private String grade;
-    private Double satisfiledScore;
+    private Double satisfiedScore;
   }
 
   @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
