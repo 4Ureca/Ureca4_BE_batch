@@ -10,6 +10,7 @@ import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
@@ -18,6 +19,7 @@ import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuild
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.beans.factory.annotation.Value;
 
 /**
  * 고객 구독 더미데이터 생성 배치 Job
@@ -78,23 +80,38 @@ public class SubscriptionDummyJobConfig {
      * (customer_id, birth_date, grade_code, created_at)
      */
     @Bean
-    public JdbcCursorItemReader<CustomerInfo> customerReader() {
-        return new JdbcCursorItemReaderBuilder<CustomerInfo>()
-                .name("customerReader")
-                .dataSource(dataSource)
-                .sql("""
-                    SELECT customer_id, birth_date, grade_code, created_at
-                    FROM customers
-                    ORDER BY customer_id
-                """)
-                .rowMapper((ResultSet rs, int rowNum) ->
-                        CustomerInfo.builder()
-                                .customerId(rs.getLong("customer_id"))
-                                .birthDate(rs.getDate("birth_date").toLocalDate())
-                                .gradeCode(rs.getString("grade_code"))
-                                .createdAt(rs.getTimestamp("created_at").toLocalDateTime())
-                                .build()
-                )
-                .build();
+    @StepScope
+    public JdbcCursorItemReader<CustomerInfo> customerReader(
+        @Value("#{jobParameters['startId']}") Long startId,
+        @Value("#{jobParameters['endId']}") Long endId
+    ) {
+
+      Long from = (startId != null) ? startId : 0L;
+      Long to   = (endId != null)   ? endId   : Long.MAX_VALUE;
+
+      String sql = """
+        SELECT customer_id, birth_date, grade_code, created_at
+        FROM customers
+        WHERE customer_id BETWEEN ? AND ?
+        ORDER BY customer_id
+    """;
+
+      return new JdbcCursorItemReaderBuilder<CustomerInfo>()
+          .name("customerReader")
+          .dataSource(dataSource)
+          .sql(sql)
+          .preparedStatementSetter(ps -> {
+            ps.setLong(1, from);
+            ps.setLong(2, to);
+          })
+          .rowMapper((rs, rowNum) ->
+              CustomerInfo.builder()
+                  .customerId(rs.getLong("customer_id"))
+                  .birthDate(rs.getDate("birth_date").toLocalDate())
+                  .gradeCode(rs.getString("grade_code"))
+                  .createdAt(rs.getTimestamp("created_at").toLocalDateTime())
+                  .build()
+          )
+          .build();
     }
 }

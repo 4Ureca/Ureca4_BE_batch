@@ -90,11 +90,9 @@ public class CustomerProcessor implements ItemProcessor<Integer, CustomerRow> {
 
   private String randomContact() {
     int r = random.nextInt(100);
-    if (r < 60)
-      return "call";
-    if (r < 85)
-      return "email";
-    return "push";
+    if (r < 80)
+      return "CALL";
+    return "CHATTING";
   }
 
   private LocalDate randomBirthDate() {

@@ -25,7 +25,7 @@ class CustomerProcessorTest {
     }
 
     assertThat(row.getGradeCode()).isIn("DIAMOND", "VIP", "VVIP");
-    assertThat(row.getPreferredContact()).isIn("call", "email", "push");
+    assertThat(row.getPreferredContact()).isIn("CALL", "CHATTING");
 
     assertThat(row.getEmail()).contains("@");
     assertThat(row.getPhone()).startsWith("010");
