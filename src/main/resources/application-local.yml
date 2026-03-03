@@ -1,10 +1,4 @@
 spring:
-  batch:
-    jdbc:
-      initialize-schema: always
-    job:
-      enabled: false
-
   datasource:
     url: jdbc:mysql://localhost:13306/crm?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
     username: crm
@@ -22,11 +16,9 @@ spring:
     uris: http://localhost:9201
 
   kafka:
-    consumer:
-      group-id: crm-group
-      auto-offset-reset: earliest
-    producer:
-      acks: all
+    bootstrap-servers: localhost:29092
 
-server:
-  port: 8081
+logging:
+  level:
+    org.springframework.jdbc: DEBUG
+    com.zaxxer.hikari: DEBUG

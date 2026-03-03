@@ -1,0 +1,21 @@
+name: Enforce Main Merge Policy
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch
+        run: |
+          BRANCH="${{ github.head_ref }}"
+
+          if [[ "$BRANCH" != "develop" && "$BRANCH" != hotfix/* ]]; then
+            echo "❌ Only develop or hotfix/* branches can merge into main"
+            exit 1
+          fi
+
+          echo "✅ Source branch allowed"
