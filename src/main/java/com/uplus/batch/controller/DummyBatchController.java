@@ -19,6 +19,7 @@ public class DummyBatchController {
   private final JobLauncher jobLauncher;
   private final Job customerDummyJob;
   private final Job subscriptionDummyJob;
+  private final Job consultationSummaryDummyJob;
 
   @PostMapping("/customers")
   public ResponseEntity<String> runCustomerDummy(
@@ -50,5 +51,19 @@ public class DummyBatchController {
     jobLauncher.run(subscriptionDummyJob, jobParameters);
 
     return ResponseEntity.ok("Subscription dummy job started");
+  }
+
+  @PostMapping("/summary-dummy")
+  public ResponseEntity<String> run(@RequestParam long count) throws Exception {
+
+    JobParameters jobParameters =
+        new JobParametersBuilder()
+            .addLong("count", count)
+            .addLong("runId", System.currentTimeMillis()) // 중복 실행 방지
+            .toJobParameters();
+
+    jobLauncher.run(consultationSummaryDummyJob, jobParameters);
+
+    return ResponseEntity.ok("Batch started");
   }
 }
