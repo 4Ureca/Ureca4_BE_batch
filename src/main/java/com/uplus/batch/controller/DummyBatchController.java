@@ -20,6 +20,7 @@ public class DummyBatchController {
   private final Job customerDummyJob;
   private final Job subscriptionDummyJob;
   private final Job consultationDummyJob;
+  private final Job consultationSummaryDummyJob;
 
   @PostMapping("/customers")
   public ResponseEntity<String> runCustomerDummy(
@@ -51,6 +52,31 @@ public class DummyBatchController {
     jobLauncher.run(subscriptionDummyJob, jobParameters);
 
     return ResponseEntity.ok("Subscription dummy job started");
+  }
+
+  @PostMapping("/summary-dummy")
+  public ResponseEntity<String> run(
+      @RequestParam long startId,
+      @RequestParam long endId
+  ) throws Exception {
+
+    if (startId > endId) {
+      return ResponseEntity.badRequest()
+          .body("startId must be less than or equal to endId");
+    }
+
+    JobParameters jobParameters =
+        new JobParametersBuilder()
+            .addLong("startId", startId)
+            .addLong("endId", endId)
+            .addLong("runId", System.currentTimeMillis()) // 중복 실행 방지
+            .toJobParameters();
+
+    jobLauncher.run(consultationSummaryDummyJob, jobParameters);
+
+    return ResponseEntity.ok(
+        "Batch started: startId=" + startId + ", endId=" + endId
+    );
   }
 
   /**
