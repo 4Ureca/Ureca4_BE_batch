@@ -6,7 +6,7 @@ spring:
 
   data:
     mongodb:
-      uri: mongodb://host.docker.internal:27017
+      uri: ${MONGO_URI}
 
 logging:
   level:
