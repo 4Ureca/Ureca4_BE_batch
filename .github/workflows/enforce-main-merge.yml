@@ -19,3 +19,23 @@ jobs:
           fi
 
           echo "✅ Source branch allowed"
+          
+  spring-test:
+    runs-on: ubuntu-latest
+    needs: validate-source
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Grant gradlew permission
+        run: chmod +x gradlew
+
+      - name: Run Spring tests
+        run: ./gradlew test
