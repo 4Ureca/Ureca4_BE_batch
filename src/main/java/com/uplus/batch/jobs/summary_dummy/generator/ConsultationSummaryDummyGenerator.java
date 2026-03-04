@@ -96,7 +96,7 @@ public class ConsultationSummaryDummyGenerator {
 
   private List<String> randomRiskFlags() {
 
-    if (random.nextInt(100) < 2 &&
+    if (random.nextInt(100) < 40 &&
         cache.getRiskTypes() != null &&
         !cache.getRiskTypes().isEmpty()) {
 
