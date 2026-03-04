@@ -3,9 +3,11 @@ package com.uplus.batch.jobs.summary_dummy.dto;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 
 @Getter
+@Builder
 @AllArgsConstructor
 public class ConsultationResultRow {
 

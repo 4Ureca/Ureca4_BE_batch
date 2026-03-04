@@ -47,7 +47,7 @@ public class ConsultationSummaryDummyGenerator {
             .phone(row.getCustomerPhone())
             .grade(row.getGradeCode())
             .ageGroup(calculateAgeGroup(row.getBirthDate()))
-            .satisfiledScore(randomSatisfiedScore())
+            .satisfiedScore(randomSatisfiedScore())
             .build()
     );
 
@@ -159,20 +159,36 @@ public class ConsultationSummaryDummyGenerator {
     return Math.round(score * 10) / 10.0;
   }
 
-  private ConsultationSummary.ResultProducts randomResultProducts() {
+  private List<ConsultationSummary.ResultProducts> randomResultProducts() {
+    int count = randomCount();
+    if (count == 0) {
+      return null;
+    }
+    List<ConsultationSummary.ResultProducts> list = new ArrayList<>();
+    for (int i = 0; i < count; i++) {
+      list.add(buildSingleResultProduct());
+    }
+    return list;
+  }
 
+  private int randomCount() {
+
+    int percent = random.nextInt(100);
+
+    if (percent < 70) {
+      return random.nextInt(3); // 0~2
+    } else {
+      return random.nextInt(2) + 3; // 3~4
+    }
+  }
+
+  private ConsultationSummary.ResultProducts buildSingleResultProduct() {
     String changeType = randomChangeType();
-
     return switch (changeType) {
-
       case "NEW" -> buildNewProducts(changeType);
-
       case "CANCEL" -> buildCancelProducts(changeType);
-
       case "CHANGE" -> buildConversionProducts(changeType);
-
       case "RENEW" -> buildRecommitmentProducts(changeType);
-
       default -> null;
     };
   }
