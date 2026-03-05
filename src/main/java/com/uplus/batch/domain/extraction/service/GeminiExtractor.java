@@ -43,29 +43,41 @@ public class GeminiExtractor {
         }
 
         String url = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL_NAME + ":generateContent?key=" + apiKey;
+        String summaryFormat = "상담의 전체 흐름을 시간 순서에 따라 '상황 → 조치 → 결과' 형태의 화살표(→)로 연결하여 단 한 문장으로 요약하여 작성.";
+        String jsonSchema = isTerminationMode 
+            ? """
+              {
+                "has_intent": boolean,
+                "complaint_reason": "string",
+                "defense_attempted": boolean,
+                "defense_success": boolean,
+                "defense_actions": ["string", ...],
+                "raw_summary": "string"
+              }
+              """
+            : """
+              {
+                "raw_summary": "string"
+              }
+              """;
 
-        String modeGoal = isTerminationMode 
-            ? "목표: 해지 및 방어 시나리오 정밀 분석" 
-            : "목표: 일반 상담 내용의 핵심 요약 (해지 관련 필드는 기본값 처리)";
+        String taskInstruction = isTerminationMode 
+            ? String.format("상담 분석 후 해지/방어 데이터를 정밀 추출하고, raw_summary는 %s", summaryFormat)
+            : String.format("다른 필드 분석은 절대 하지 마세요. 오직 raw_summary 필드만 %s", summaryFormat);
 
         String prompt = String.format("""
-            당신은 상담 분석 전문가입니다. %s.
-            다음 원문을 분석하여 JSON 데이터만 출력하세요. (설명 생략)
+            당신은 상담 분석 전문가입니다.
+            [지시사항]: %s
+
+            반드시 아래 JSON 형식으로만 응답하세요. (설명 생략, 다른 필드 추가 금지)
             
-            {
-              "has_intent": boolean,
-              "complaint_reason": "string",
-              "defense_attempted": boolean,
-              "defense_success": boolean,
-              "defense_actions": ["string", ...],
-              "raw_summary": "string"
-            }
+            %s
 
             분석할 상담 원문: "%s"
-            """, modeGoal, rawIssue);
+            """, taskInstruction, jsonSchema, rawIssue);
 
         try {
-            log.info("[AI] 호출 모델: {}, 모드: {}", MODEL_NAME, isTerminationMode ? "정밀분석" : "요약");
+            log.info("[AI] 호출 모델: {}, 분석 모드: {}", MODEL_NAME, isTerminationMode ? "해지분석" : "일반요약");
             
             String rawResponse = restClient.post()
                     .uri(url)
@@ -90,7 +102,10 @@ public class GeminiExtractor {
     private Map<String, Object> buildGeminiPayload(String prompt) {
         return Map.of(
             "contents", List.of(Map.of("parts", List.of(Map.of("text", prompt)))),
-            "generationConfig", Map.of("temperature", 0.1, "response_mime_type", "application/json")
+            "generationConfig", Map.of(
+                "temperature", 0.1, 
+                "response_mime_type", "application/json"
+            )
         );
     }
 
@@ -100,7 +115,11 @@ public class GeminiExtractor {
         
         JsonNode usage = root.path("usageMetadata");
         if (!usage.isMissingNode()) {
-            log.info("[AI Usage] 총 토큰: {}", usage.path("totalTokenCount").asInt());
+            int inputTokens = usage.path("promptTokenCount").asInt();      
+            int totalTokens = usage.path("totalTokenCount").asInt();       
+            int calculatedOutput = totalTokens - inputTokens;
+            log.info("[AI Usage] 입력: {}, 출력(비용): {}, 총합: {}", 
+                     inputTokens, calculatedOutput, totalTokens);
         }
 
         return root.path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();

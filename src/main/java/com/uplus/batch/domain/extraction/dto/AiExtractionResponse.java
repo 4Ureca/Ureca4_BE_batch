@@ -8,4 +8,8 @@ public record AiExtractionResponse(
     boolean defense_success,
     List<String> defense_actions,
     String raw_summary
-) {}
+) {
+	public AiExtractionResponse {
+        if (defense_actions == null) defense_actions = java.util.Collections.emptyList();
+    }
+}
