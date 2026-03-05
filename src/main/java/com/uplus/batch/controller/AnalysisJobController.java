@@ -26,6 +26,8 @@ public class AnalysisJobController {
     private final JobLauncher jobLauncher;
     private final Job customerRiskJob;
     private final Job hourlyConsultJob;
+    private final Job weeklyPerformanceJob;
+    private final Job monthlyPerformanceJob;
 
     private final Job weeklyAdminReportJob; // 주별 전체 리포트 배치
     private final Job monthlyAdminReportJob; // 월별 리포트 Job 추가
@@ -89,6 +91,60 @@ public class AnalysisJobController {
         jobLauncher.run(hourlyConsultJob, params);
 
         return ResponseEntity.ok("HourlyConsult job started (targetDate=" + targetDate + ", slot=" + slot + ")");
+    }
+
+    /**
+     * 주간 전체 상담 성과 집계 Job 실행
+     *
+     * @param startDate 집계 시작 날짜 (yyyy-MM-dd, 월요일)
+     * @param endDate   집계 종료 날짜 (yyyy-MM-dd, 일요일)
+     *
+     * curl -X POST "http://localhost:8081/api/jobs/weekly-performance?startDate=2025-01-13&endDate=2025-01-19"
+     */
+    @PostMapping("/weekly-performance")
+    public ResponseEntity<String> runWeeklyPerformance(
+            @RequestParam String startDate,
+            @RequestParam String endDate
+    ) throws Exception {
+
+        JobParameters params = new JobParametersBuilder()
+                .addLong("runId", System.currentTimeMillis())
+                .addString("startDate", startDate)
+                .addString("endDate", endDate)
+                .addString("targetCollection", "weekly_report_snapshot")
+                .toJobParameters();
+
+        log.info("[AnalysisJob] weeklyPerformanceJob 수동 실행 요청 — {} ~ {}", startDate, endDate);
+        jobLauncher.run(weeklyPerformanceJob, params);
+
+        return ResponseEntity.ok("WeeklyPerformance job started (" + startDate + " ~ " + endDate + ")");
+    }
+
+    /**
+     * 월간 전체 상담 성과 집계 Job 실행
+     *
+     * @param startDate 집계 시작 날짜 (yyyy-MM-dd, 1일)
+     * @param endDate   집계 종료 날짜 (yyyy-MM-dd, 말일)
+     *
+     * curl -X POST "http://localhost:8081/api/jobs/monthly-performance?startDate=2025-01-01&endDate=2025-01-31"
+     */
+    @PostMapping("/monthly-performance")
+    public ResponseEntity<String> runMonthlyPerformance(
+            @RequestParam String startDate,
+            @RequestParam String endDate
+    ) throws Exception {
+
+        JobParameters params = new JobParametersBuilder()
+                .addLong("runId", System.currentTimeMillis())
+                .addString("startDate", startDate)
+                .addString("endDate", endDate)
+                .addString("targetCollection", "monthly_report_snapshot")
+                .toJobParameters();
+
+        log.info("[AnalysisJob] monthlyPerformanceJob 수동 실행 요청 — {} ~ {}", startDate, endDate);
+        jobLauncher.run(monthlyPerformanceJob, params);
+
+        return ResponseEntity.ok("MonthlyPerformance job started (" + startDate + " ~ " + endDate + ")");
     }
 
 
