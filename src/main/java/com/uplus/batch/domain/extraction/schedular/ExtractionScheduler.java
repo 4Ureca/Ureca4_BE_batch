@@ -80,7 +80,7 @@ public class ExtractionScheduler {
 
             // 4. [검증] AI 응답 결과가 비어있는지 체크 (raw_summary null 방어)
             if (result.raw_summary() == null || result.raw_summary().isBlank()) {
-                throw new RuntimeException("AI가 요약 내용을 생성하지 못했습니다.");
+                throw new RuntimeException("AI가 내용을 생성하지 못했습니다.");
             }
 
             // 5. [저장] 결과 적재
@@ -95,7 +95,8 @@ public class ExtractionScheduler {
 
             // 6. [성공 마감]
             task.complete();
-            log.info("[Success] 상담 ID {} 분석 완료", task.getConsultId());
+            eventRepository.saveAndFlush(task);
+            log.info("[Success] 상담 ID {} 추출 완료", task.getConsultId());
 
         } catch (Exception e) {
         	log.error("[Task Failed] ID {}: {}", task.getConsultId(), e.getMessage());
