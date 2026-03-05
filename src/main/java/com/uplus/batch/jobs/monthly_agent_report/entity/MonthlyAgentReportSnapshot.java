@@ -26,7 +26,7 @@ public class MonthlyAgentReportSnapshot {
   @Id
   private String id;
 
-//  @Indexed
+  @Indexed
   private String agentId;      // 상담사 식별자
 
   private LocalDate startAt;   // 집계 시작 시각 (해당 월 1일 00:00)
@@ -45,7 +45,7 @@ public class MonthlyAgentReportSnapshot {
   @CreatedDate
   private LocalDateTime createdAt; // 문서 생성 일시
 
-  // --- 내부 계층 구조 (주별과 동일하지만 월별 데이터 성격에 맞춰 사용) ---
+  // --- 내부 계층 구조---
 
   @Data
   public static class QualityAnalysis {
@@ -61,7 +61,6 @@ public class MonthlyAgentReportSnapshot {
 
   @Data
   public static class CustomerSatisfactionAnalysis {
-    private double satisfactionScore;     // 감성 분석 기반 정량 점수
     private List<String> satisfactionDetails; // 질문 항목에 대한 답변들 평균 리스트
   }
 }

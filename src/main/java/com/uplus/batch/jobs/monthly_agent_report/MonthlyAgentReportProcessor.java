@@ -38,7 +38,7 @@ public class MonthlyAgentReportProcessor implements
         Criteria.where("agentId").is(agentId)
             .and("startAt").gte(startAt).lte(endAt)
     );
-    List<DailyAgentReportSnapshot> dailySnapshots = mongoTemplate.find(query, DailyAgentReportSnapshot.class, "daily_agent_report_snapshot");
+    List<DailyAgentReportSnapshot> dailySnapshots = mongoTemplate.find(query, DailyAgentReportSnapshot.class);
 
     if (dailySnapshots.isEmpty()) return null;
 

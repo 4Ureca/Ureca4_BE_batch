@@ -11,7 +11,6 @@ public class CategoryRanking {
   private String code;
   private String large;
   private String medium;
-//  private String small;
   private int count;
   private int rank;
 }

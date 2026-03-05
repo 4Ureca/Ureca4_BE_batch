@@ -1,6 +1,5 @@
 package com.uplus.batch.jobs.monthly_agent_report;
 
-import com.uplus.batch.jobs.daily_agent_report.entity.DailyAgentReportSnapshot;
 import com.uplus.batch.jobs.monthly_agent_report.entity.MonthlyAgentReportSnapshot;
 import java.util.ArrayList;
 import java.util.List;

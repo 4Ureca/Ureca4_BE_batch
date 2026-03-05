@@ -59,16 +59,6 @@ public class DailyAgentReportProcessor implements ItemProcessor<String, DailyAge
             .and("consultedAt").gte(startDt).lte(endDt)
     );
 
-//    GroupOperation group = Aggregation.group("category.code")
-//        .first("category.large").as("large")
-//        .first("category.medium").as("mid")
-//        .first("category.small").as("small")
-//        .count().as("count");
-//
-//    ProjectionOperation project = Aggregation.project("large", "mid", "small", "count")
-//        .and("_id").as("code");
-//
-//    SortOperation sort = Aggregation.sort(Sort.Direction.DESC, "count");
 
     GroupOperation group = Aggregation.group("category.code") // 중분류 코드로 그룹핑
         .first("category.large").as("large")            // 대분류 명칭
@@ -79,10 +69,6 @@ public class DailyAgentReportProcessor implements ItemProcessor<String, DailyAge
         .and("_id").as("code"); // 중분류 코드를 code 필드로 사용
 
     SortOperation sort = Aggregation.sort(Sort.Direction.DESC, "count");
-
-
-
-
 
 
     Aggregation aggregation = Aggregation.newAggregation(match, group, project, sort);

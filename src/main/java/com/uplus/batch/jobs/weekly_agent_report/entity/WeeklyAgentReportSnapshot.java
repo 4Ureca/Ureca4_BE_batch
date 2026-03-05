@@ -26,7 +26,7 @@ public class WeeklyAgentReportSnapshot {
   @Id
   private String id;
 
-//  @Indexed
+  @Indexed
   private String agentId;      // 상담사 식별자
 
   private LocalDate startAt;   // 집계 시작 시각 (월요일 00:00)
@@ -75,7 +75,6 @@ public class WeeklyAgentReportSnapshot {
 
   @Data
   public static class CustomerSatisfactionAnalysis {
-    private double satisfactionScore;     // 감성 분석 기반 정량 점수
     private List<String> satisfactionDetails; // 질문 항목에 대한 답변들 평균
   }
 }

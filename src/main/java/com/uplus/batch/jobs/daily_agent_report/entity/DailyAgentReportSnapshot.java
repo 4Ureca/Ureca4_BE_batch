@@ -47,31 +47,14 @@ public class DailyAgentReportSnapshot {
    */
   private QualityAnalysis qualityAnalysis;
 
-  /**외부로 뺌**/
-  // --- 내부 객체 정의 ---
-//
-//  @Getter
-//  @Setter
-//  @NoArgsConstructor
-//  @AllArgsConstructor
-//  @Builder
-//  public static class CategoryRanking {
-//    private String code;   // 카테고리 코드 (M_FEE_01 등)
-//    private String large;  // 카테고리 대분류 (요금/납부 등)
-//    private String mid;    // 카테고리 중분류 (요금제 변경 등)
-//    private String small;  // 카테고리 소분류 (5G 요금제 안내 등)
-//    private int count;     // 해당 카테고리 처리 건수 (중분류 기준 건수)
-//    private int rank;      // 건수 기준 순위
-//  }
 
   @Getter
   @NoArgsConstructor
   @AllArgsConstructor
   @Builder
-  public static class QualityAnalysis {
+  public static class QualityAnalysis { // 응대 품질 기능 구현할 때 보완필요
     private int greetingCount;       // 인사말 포함 건수
     private double greetingRate;     // 인사말 포함 비율 (%)
     private int empathyExpressionCount; // 공감 표현 총 횟수
-    // 필요한 추가 응대 품질 지표들...
   }
 }

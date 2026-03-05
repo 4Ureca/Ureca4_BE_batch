@@ -1,6 +1,5 @@
 package com.uplus.batch.jobs.weekly_agent_report;
 
-import com.uplus.batch.jobs.daily_agent_report.entity.DailyAgentReportSnapshot;
 import com.uplus.batch.jobs.weekly_agent_report.entity.WeeklyAgentReportSnapshot;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,12 +23,12 @@ import org.springframework.transaction.PlatformTransactionManager;
 public class WeeklyAgentReportJobConfig {
 
   private final MongoTemplate mongoTemplate;
-  private final WeeklyAgentReportProcessor weeklyAgentReportProcessor; // 주별 프로세서 주입
+  private final WeeklyAgentReportProcessor weeklyAgentReportProcessor;
   private final PlatformTransactionManager transactionManager;
 
   @Bean
   public Job weeklyAgentReportJob(JobRepository jobRepository, Step weeklyAgentReportStep) {
-    return new JobBuilder("weeklyAgentReportJob", jobRepository) // Job 이름 구분
+    return new JobBuilder("weeklyAgentReportJob", jobRepository)
         .start(weeklyAgentReportStep)
         .build();
   }
@@ -37,8 +36,8 @@ public class WeeklyAgentReportJobConfig {
   @Bean
   public Step weeklyAgentReportStep(JobRepository jobRepository) {
     return new StepBuilder("weeklyAgentReportStep", jobRepository)
-        .<String, WeeklyAgentReportSnapshot>chunk(10, transactionManager) // 상담사 10명씩 처리
-        .reader(weeklyAgentIdReader())      // 일별과 같은 리더를 써도 되지만 이름을 구분함
+        .<String, WeeklyAgentReportSnapshot>chunk(10, transactionManager) // 상담사 10명씩 처리. 나중에 수정
+        .reader(weeklyAgentIdReader())
         .processor(weeklyAgentReportProcessor)
         .writer(weeklySnapshotWriter())
         .build();

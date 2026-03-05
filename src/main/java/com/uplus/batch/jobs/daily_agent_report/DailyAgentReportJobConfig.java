@@ -21,8 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Configuration
 @RequiredArgsConstructor
 public class DailyAgentReportJobConfig {
-//  private final JobBuilderFactory jobBuilderFactory;
-//  private final StepBuilderFactory stepBuilderFactory;
+
   private final MongoTemplate mongoTemplate;
   private final DailyAgentReportProcessor dailyAgentReportProcessor;
   private final PlatformTransactionManager transactionManager;
@@ -46,7 +45,6 @@ public class DailyAgentReportJobConfig {
 
   @Bean
   public ItemReader<String> agentIdReader() {
-    // consultation_summary 컬렉션에서 유니크한 상담사 ID들을 가져옴
     List<String> agentIds = mongoTemplate.getCollection("consultation_summary")
         .distinct("agent._id", Integer.class)
         .into(new ArrayList<>())
