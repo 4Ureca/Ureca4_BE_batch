@@ -4,6 +4,10 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
 
+  data:
+    mongodb:
+      uri: ${MONGO_URI}
+
 logging:
   level:
     root: INFO

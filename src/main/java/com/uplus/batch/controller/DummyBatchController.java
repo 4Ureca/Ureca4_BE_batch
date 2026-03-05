@@ -1,6 +1,5 @@
 package com.uplus.batch.controller;
 
-import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
@@ -10,6 +9,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import lombok.RequiredArgsConstructor;
 
 @RestController
 @RequestMapping("/dummy")
@@ -22,7 +23,8 @@ public class DummyBatchController {
   private final Job consultationDummyJob;
   private final Job consultationSummaryDummyJob;
   private final Job rawTextDummyJob;
-
+  private final Job customerPolicyDummyJob;
+  
   @PostMapping("/customers")
   public ResponseEntity<String> runCustomerDummy(
       @RequestParam(defaultValue = "1000") int count
@@ -125,4 +127,21 @@ public class DummyBatchController {
 
     return ResponseEntity.ok("Consultation dummy job started (" + count + "건)");
   }
+  
+  /**
+   * customer_policy 더미데이터 생성
+   * curl -X POST "http://localhost:8081/dummy/customer-policies"
+   */
+  @PostMapping("/customer-policies")
+  public ResponseEntity<String> runCustomerPolicyDummy() throws Exception {
+
+    JobParameters jobParameters = new JobParametersBuilder()
+        .addLong("runId", System.currentTimeMillis())
+        .toJobParameters();
+
+    jobLauncher.run(customerPolicyDummyJob, jobParameters);
+
+    return ResponseEntity.ok("Customer policy dummy job started");
+  }
+  
 }
