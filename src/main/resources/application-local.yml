@@ -7,10 +7,9 @@ spring:
   data:
     mongodb:
       uri: mongodb://localhost:27018/crm
-
-  redis:
-    host: localhost
-    port: 6380
+    redis:
+      host: localhost
+      port: 6380
 
   elasticsearch:
     uris: http://localhost:9201
