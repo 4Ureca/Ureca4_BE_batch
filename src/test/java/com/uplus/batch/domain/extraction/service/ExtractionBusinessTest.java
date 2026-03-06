@@ -107,6 +107,6 @@ class ExtractionBusinessTest {
 
         // Then
         assertThat(testTask.getStatus()).isEqualTo(EventStatus.FAILED);
-        assertThat(testTask.getFailReason()).contains("AI가 요약 내용을 생성하지 못했습니다");
+        assertThat(testTask.getFailReason()).contains("AI가 내용을 생성하지 못했습니다");
     }
 }
