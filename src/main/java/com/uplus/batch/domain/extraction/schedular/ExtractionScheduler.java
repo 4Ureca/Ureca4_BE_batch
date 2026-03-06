@@ -30,10 +30,10 @@ public class ExtractionScheduler {
     private final ObjectMapper objectMapper;
 
     /**
-     * 5분마다 실행되는 메인 엔진
+     * 1분마다 실행되는 메인 엔진
      * 전체 트랜잭션을 걸지 않아 개별 작업의 실패가 전체에 영향을 주지 않습니다.
      */
-    @Scheduled(fixedDelay = 300000)
+    @Scheduled(fixedDelay = 60000)
     public void executeExtractionJob() {
         log.info("[Batch]추출 스케줄러 엔진 가동 - 대기 데이터 확인 중...");
 
