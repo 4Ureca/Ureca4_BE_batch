@@ -1,5 +1,6 @@
 package com.uplus.batch.controller;
 
+import java.time.LocalDateTime;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
@@ -32,6 +33,10 @@ public class AnalysisJobController {
     private final Job weeklyAdminReportJob; // 주별 전체 리포트 배치
     private final Job monthlyAdminReportJob; // 월별 리포트 Job 추가
     private final Job dailyKeywordJob; // 일별 키워드 집계 Job
+
+    private final Job dailyAgentReportJob; // 일별 상담사 개인 리포트 job
+    private final Job weeklyAgentReportJob; // 주벌 상담사 개인 리포트 job
+    private final Job monthlyAgentReportJob; //월별 상담사 개인 리포트 job
 
 
     /**
@@ -228,6 +233,77 @@ public class AnalysisJobController {
         } catch (Exception e) {
             log.error("월별 배치 실행 중 오류 발생: ", e);
             return ResponseEntity.internalServerError().body("배치 실행 실패: " + e.getMessage());
+        }
+    }
+
+
+    /**
+     * 상담사 일별 리포트 배치 수동 실행 (어제 데이터 집계)
+     * 호출: http://localhost:8081/api/jobs/daily-agent-report
+     */
+    @GetMapping("/daily-agent-report")
+    public String runDailyAgentReportJob() {
+        try {
+            JobParameters jobParameters = new JobParametersBuilder()
+                // 동일 파라미터 재실행 방지를 위해 실행 시각만 기록
+                .addString("executionTime", LocalDateTime.now().toString())
+                .toJobParameters();
+
+            jobLauncher.run(dailyAgentReportJob, jobParameters);
+
+            return "Daily Agent Report Batch has been started for yesterday's data.";
+        } catch (Exception e) {
+            log.error("Batch Manual Execution Failed", e);
+            return "Batch Job Failed: " + e.getMessage();
+        }
+    }
+
+    /**
+     * 상담사 주별 리포트 배치 수동 실행
+     * 일별 스냅샷(daily_agent_report_snapshot)을 기반으로 지난주 월~일을 집계합니다.
+     * 호출: http://localhost:8081/api/jobs/weekly-agent-report
+     */
+    @GetMapping("/weekly-agent-report")
+    public String runWeeklyAgentReportJob() {
+        try {
+            JobParameters jobParameters = new JobParametersBuilder()
+                // 동일 파라미터로 인한 실행 거부를 방지하기 위해 현재 시각 추가
+                .addString("executionTime", LocalDateTime.now().toString())
+                .addString("jobType", "WEEKLY")
+                .toJobParameters();
+
+            // 주별 Job 실행
+            jobLauncher.run(weeklyAgentReportJob, jobParameters);
+
+            return "Weekly Agent Report Batch has been started (Based on last week's Daily Snapshots).";
+        } catch (Exception e) {
+            log.error("Weekly Batch Manual Execution Failed", e);
+            return "Weekly Batch Job Failed: " + e.getMessage();
+        }
+    }
+
+
+    /**
+     * 상담사 월별 리포트 배치 수동 실행
+     * 일별 스냅샷(daily_agent_report_snapshot)을 기반으로 지난달 1~31을 집계합니다.
+     * 호출: http://localhost:8081/api/jobs/monthly-agent-report
+     */
+    @GetMapping("/monthly-agent-report")
+    public String runMonthlyAgentReportJob() {
+        try {
+            JobParameters jobParameters = new JobParametersBuilder()
+                // 동일 파라미터로 인한 실행 거부를 방지하기 위해 현재 시각 추가
+                .addString("executionTime", LocalDateTime.now().toString())
+                .addString("jobType", "MONTHLY")
+                .toJobParameters();
+
+            // 주별 Job 실행
+            jobLauncher.run(monthlyAgentReportJob, jobParameters);
+
+            return "Monthly Agent Report Batch has been started (Based on last month's Daily Snapshots).";
+        } catch (Exception e) {
+            log.error("Monthly Batch Manual Execution Failed", e);
+            return "Monthly Batch Job Failed: " + e.getMessage();
         }
     }
 }
