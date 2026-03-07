@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
@@ -44,6 +45,7 @@ public class DailyAgentReportJobConfig {
   }
 
   @Bean
+  @StepScope // 실행 시점에 생성되도록 설정
   public ItemReader<String> agentIdReader() {
     List<String> agentIds = mongoTemplate.getCollection("consultation_summary")
         .distinct("agent._id", Integer.class)

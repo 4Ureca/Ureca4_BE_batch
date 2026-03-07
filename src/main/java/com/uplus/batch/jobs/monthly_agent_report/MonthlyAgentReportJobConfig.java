@@ -6,6 +6,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
@@ -43,6 +44,7 @@ public class MonthlyAgentReportJobConfig {
   }
 
   @Bean
+  @StepScope
   public ItemReader<String> monthlyAgentIdReader() {
     // 일별 스냅샷 컬렉션에서 고유한 상담사 ID들을 가져옴
     List<String> agentIds = mongoTemplate.getCollection("daily_agent_report_snapshot")

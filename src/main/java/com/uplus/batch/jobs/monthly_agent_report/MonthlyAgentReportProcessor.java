@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -18,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
+@StepScope
 public class MonthlyAgentReportProcessor implements
     ItemProcessor<String, MonthlyAgentReportSnapshot> {
 
@@ -44,11 +46,19 @@ public class MonthlyAgentReportProcessor implements
 
     // 2. 데이터 합산 (건수 및 카테고리 랭킹)
     long totalConsultCount = 0;
+    double totalDurationSum = 0;
+    double totalSatisfactionSum = 0;
     Map<String, CategoryRanking> combinedRankings = new HashMap<>();
 
     for (DailyAgentReportSnapshot day : dailySnapshots) {
+      long dayCount = day.getConsultCount();
       totalConsultCount += day.getConsultCount();
 
+      // 가중치 계산을 위한 합산 (건수가 0인 날은 제외됨)
+      totalDurationSum += (day.getAvgDurationMinutes() * dayCount);
+      totalSatisfactionSum += (day.getCustomerSatisfaction() * dayCount);
+
+      // 처리 카테고리 순위 및 건수
       for (CategoryRanking r : day.getCategoryRanking()) {
         CategoryRanking existing = combinedRankings.getOrDefault(r.getCode(),
             new CategoryRanking(r.getCode(), r.getLarge(), r.getMedium(), 0, 0));
@@ -57,7 +67,11 @@ public class MonthlyAgentReportProcessor implements
       }
     }
 
-    // 3. 카테고리 재정렬 및 순위 부여
+    // 3. 최종 월별 지표 산출
+    double monthlyAvgDuration = totalConsultCount > 0 ? totalDurationSum / totalConsultCount : 0;
+    double monthlyAvgSatisfaction = totalConsultCount > 0 ? totalSatisfactionSum / totalConsultCount : 0;
+
+    // 4. 카테고리 재정렬 및 순위 부여
     List<CategoryRanking> sortedRankings = combinedRankings.values().stream()
         .sorted(Comparator.comparingLong(CategoryRanking::getCount).reversed())
         .collect(Collectors.toList());
@@ -66,12 +80,14 @@ public class MonthlyAgentReportProcessor implements
       sortedRankings.get(i).setRank(i + 1);
     }
 
-    // 4. 월별 결과 생성
+    // 5. 월별 결과 생성
     return MonthlyAgentReportSnapshot.builder()
         .agentId(agentId)
         .startAt(startAt)
         .endAt(endAt)
         .consultCount(totalConsultCount)
+        .avgDurationMinutes(monthlyAvgDuration) // 주간 가중 평균 소요 시간
+        .customerSatisfaction(monthlyAvgSatisfaction) // 주간 가중 평균 만족도
         .categoryRanking(sortedRankings)
         .build();
   }

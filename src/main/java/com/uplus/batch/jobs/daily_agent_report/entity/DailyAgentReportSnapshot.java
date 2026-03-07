@@ -35,6 +35,8 @@ public class DailyAgentReportSnapshot {
 
   private double avgDurationMinutes; // 개인 평균 상담 소요 시간 (분 단위)
 
+  private double customerSatisfaction; // 고객 만족도
+
   private double iamWriteRate; // 상담 완료 대비 IAM 작성 비율 (%)
 
   /**

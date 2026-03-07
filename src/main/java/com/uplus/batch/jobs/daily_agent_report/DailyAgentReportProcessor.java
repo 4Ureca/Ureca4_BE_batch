@@ -2,15 +2,21 @@ package com.uplus.batch.jobs.daily_agent_report;
 
 import com.uplus.batch.jobs.daily_agent_report.entity.CategoryRanking;
 import com.uplus.batch.jobs.daily_agent_report.entity.DailyAgentReportSnapshot;
+import com.uplus.batch.jobs.daily_agent_report.entity.DailyMetrics;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.aggregation.GroupOperation;
 import org.springframework.data.mongodb.core.aggregation.MatchOperation;
 import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
@@ -20,6 +26,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 @RequiredArgsConstructor
+@StepScope
 public class DailyAgentReportProcessor implements ItemProcessor<String, DailyAgentReportSnapshot> {
 
   private final MongoTemplate mongoTemplate;
@@ -37,19 +44,23 @@ public class DailyAgentReportProcessor implements ItemProcessor<String, DailyAge
     // 1. 카테고리별 집계 (기존에 작성했던 Aggregation 로직 활용)
     List<CategoryRanking> rankings = aggregateCategoryRanking(agentId, targetDate);
 
-    // 2. 전체 상담 건수 계산
-    long totalCount = rankings.stream().mapToLong(CategoryRanking::getCount).sum();
+    // 2. 전체 성과 지표 집계 (평균 소요 시간, 만족도 포함)
+    DailyMetrics metrics = aggregateDailyMetrics(agentId, targetDate);
 
     // 3. 스냅샷 객체 생성
     return DailyAgentReportSnapshot.builder()
         .agentId(agentId)
         .startAt(targetDate)
         .endAt(targetDate)
-        .consultCount(totalCount)
+        .consultCount(metrics.getCount())
+        .avgDurationMinutes(metrics.getAvgDuration() / 60.0) // 초 단위를 분 단위로 변환
+        .customerSatisfaction(metrics.getAvgSatisfaction()) // 고객 만족도 평균
         .categoryRanking(rankings)
         .build();
   }
 
+
+  // 처리 카테고리별 건수 및 순위
   private List<CategoryRanking> aggregateCategoryRanking(String agentId, LocalDate date) {
     LocalDateTime startDt = date.atStartOfDay();
     LocalDateTime endDt = date.atTime(LocalTime.MAX);
@@ -81,4 +92,30 @@ public class DailyAgentReportProcessor implements ItemProcessor<String, DailyAge
     }
     return results;
   }
+
+
+  // 전체 상담 성과(처리건수, 소요시간, 고객만족도)
+  private DailyMetrics aggregateDailyMetrics(String agentId, LocalDate date) {
+    LocalDateTime start = date.atStartOfDay();
+    LocalDateTime end = date.atTime(LocalTime.MAX);
+
+    Aggregation aggregation = Aggregation.newAggregation(
+        Aggregation.match(Criteria.where("agent._id").is(Integer.parseInt(agentId))
+            .and("consultedAt").gte(start).lte(end)),
+
+        Aggregation.group("agent._id")
+            .count().as("count")
+            .avg("durationSec").as("avgDuration")
+            .avg("customer.satisfiedScore").as("avgSatisfaction")
+    );
+
+    AggregationResults<DailyMetrics> results = mongoTemplate.aggregate(
+        aggregation, "consultation_summary", DailyMetrics.class
+    );
+
+    return results.getUniqueMappedResult() != null ?
+        results.getUniqueMappedResult() : new DailyMetrics(0, 0.0, 0.0);
+  }
+
+
 }

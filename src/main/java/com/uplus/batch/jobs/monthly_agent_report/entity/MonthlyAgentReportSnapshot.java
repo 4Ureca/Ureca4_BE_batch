@@ -35,6 +35,7 @@ public class MonthlyAgentReportSnapshot {
   private long consultCount;   // 개인 상담 처리 건수
   private double avgConsultPerAgent; // 상담사 평균 처리 건수
   private double avgDurationMinutes; // 개인 평균 상담 소요 시간(분)
+  private double customerSatisfaction; // 고객 만족도
   private double iamWriteRate;       // 상담 완료 대비 IAM 작성 비율(%)
 
   private List<CategoryRanking> categoryRanking; // 처리 카테고리 순위 리스트
