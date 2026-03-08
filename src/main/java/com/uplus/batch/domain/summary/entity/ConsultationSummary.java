@@ -80,6 +80,7 @@ public class ConsultationSummary {
     private String phone;
     private String name;
     private String ageGroup;
+    private String gender;
     private String grade;
     private Double satisfiedScore;
   }
