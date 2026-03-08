@@ -44,15 +44,6 @@ public class MonthlyAgentReportJobConfig {
         .build();
   }
 
-//  @Bean
-//  @StepScope
-//  public ItemReader<String> monthlyAgentIdReader() {
-//    // 일별 스냅샷 컬렉션에서 고유한 상담사 ID들을 가져옴
-//    List<String> agentIds = mongoTemplate.getCollection("daily_agent_report_snapshot")
-//        .distinct("agentId", String.class)
-//        .into(new ArrayList<>());
-//    return new ListItemReader<>(agentIds);
-//  }
 
   @Bean
   @StepScope

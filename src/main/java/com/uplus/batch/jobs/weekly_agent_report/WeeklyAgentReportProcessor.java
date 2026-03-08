@@ -48,6 +48,10 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
     long totalConsultCount = 0;
     double totalDurationSum = 0; // (평균 시간 * 건수)의 합산
     double totalSatisfactionSum = 0; // (만족도 * 건수)의 합산
+
+    long totalSurveyTotalCount = 0;    // [추가] 주간 전체 설문 요청 수 합산용
+    long totalSurveyResponseCount = 0; // [추가] 주간 전체 설문 응답 수 합산용
+
     Map<String, CategoryRanking> combinedRankings = new HashMap<>();
 
     for (DailyAgentReportSnapshot day : dailySnapshots) {
@@ -56,7 +60,15 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
 
       // 가중치 계산을 위한 합산 (건수가 0인 날은 제외됨)
       totalDurationSum += (day.getAvgDurationMinutes() * dayCount);
-      totalSatisfactionSum += (day.getCustomerSatisfaction() * dayCount);
+//      totalSatisfactionSum += (day.getCustomerSatisfaction() * dayCount);
+      totalSatisfactionSum += (day.getCustomerSatisfactionAnalysis().getSatisfactionScore() * dayCount);
+
+      // [추가] 일별 응답률 원천 데이터 합산
+      if (day.getCustomerSatisfactionAnalysis() != null) {
+        totalSurveyTotalCount += day.getCustomerSatisfactionAnalysis().getSurveyTotalCount();
+        totalSurveyResponseCount += day.getCustomerSatisfactionAnalysis().getSurveyResponseCount();
+      }
+
 
       // 카테고리 랭킹 합산 로직
       for (CategoryRanking r : day.getCategoryRanking()) {
@@ -66,6 +78,11 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
         combinedRankings.put(r.getCode(), existing);
       }
     }
+
+    // [추가] 주간 평균 응답률 산출
+    double weeklyAvgResponseRate = totalSurveyTotalCount > 0
+        ? (double) totalSurveyResponseCount / totalSurveyTotalCount * 100.0
+        : 0;
 
     // 3. 최종 평균 지표 산출 (전체 건수로 나눔)
     double weeklyAvgDuration = totalConsultCount > 0 ? totalDurationSum / totalConsultCount : 0;
@@ -87,7 +104,13 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
         .endAt(endAt)
         .consultCount(totalConsultCount)
         .avgDurationMinutes(weeklyAvgDuration) // 주간 가중 평균 소요 시간
-        .customerSatisfaction(weeklyAvgSatisfaction) // 주간 가중 평균 만족도
+        .customerSatisfactionAnalysis(
+            WeeklyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(weeklyAvgSatisfaction) // 주간 평균 만족도 점수
+                .responseRate(weeklyAvgResponseRate)    // 주간 평균 응답률 (미리 준비)
+                .build()
+        )
+//        .customerSatisfaction(weeklyAvgSatisfaction) // 주간 가중 평균 만족도
         .categoryRanking(sortedRankings)
         .build();
   }

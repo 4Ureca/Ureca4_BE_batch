@@ -17,6 +17,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.ConditionalOperators;
 import org.springframework.data.mongodb.core.aggregation.GroupOperation;
 import org.springframework.data.mongodb.core.aggregation.MatchOperation;
 import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
@@ -54,7 +55,17 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         .endAt(targetDate)
         .consultCount(metrics.getCount())
         .avgDurationMinutes(metrics.getAvgDuration() / 60.0) // 초 단위를 분 단위로 변환
-        .customerSatisfaction(metrics.getAvgSatisfaction()) // 고객 만족도 평균
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(metrics.getAvgSatisfaction())
+                // 응답률 계산: (응답건수 / 전체건수) * 100
+                .responseRate(metrics.getCount() > 0
+                    ? (double) metrics.getCompletedSurveyCount() / metrics.getCount() * 100.0 : 0)
+                .surveyTotalCount((int) metrics.getCount())          // 주간/월간 집계용 재료 1
+                .surveyResponseCount((int) metrics.getCompletedSurveyCount()) // 주간/월간 집계용 재료 2
+                .build()
+        )
+//        .customerSatisfaction(metrics.getAvgSatisfaction()) // 고객 만족도 평균
         .categoryRanking(rankings)
         .build();
   }
@@ -107,14 +118,28 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
             .count().as("count")
             .avg("durationSec").as("avgDuration")
             .avg("customer.satisfiedScore").as("avgSatisfaction")
+            // [수정] $exists 대신 $gt(0)를 사용하여 점수가 매겨졌는지 확인합니다.
+            .sum(ConditionalOperators.when(Criteria.where("customer.satisfiedScore").gt(0))
+                .then(1).otherwise(0)).as("completedSurveyCount")
     );
 
     AggregationResults<DailyMetrics> results = mongoTemplate.aggregate(
         aggregation, "consultation_summary", DailyMetrics.class
     );
 
-    return results.getUniqueMappedResult() != null ?
-        results.getUniqueMappedResult() : new DailyMetrics(0, 0.0, 0.0);
+    DailyMetrics metrics = results.getUniqueMappedResult();
+
+    if (metrics == null) {
+      return new DailyMetrics(0L, 0.0, 0.0, 0L, 0.0);
+    }
+
+    // Processor에서 계산해도 되지만, Metrics 객체 내부에서 응답률을 최종 계산하도록 설정할 수 있습니다.
+    metrics.calculateResponseRate();
+
+    return metrics;
+
+//    return results.getUniqueMappedResult() != null ?
+//        results.getUniqueMappedResult() : new DailyMetrics(0, 0.0, 0.0, 0.0);
   }
 
 
