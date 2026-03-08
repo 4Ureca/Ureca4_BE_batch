@@ -10,5 +10,5 @@ import lombok.NoArgsConstructor;
 public class DailyMetrics {
   private long count;          // 건수
   private double avgDuration;  // 소요 시간(초)
-  private double avgSatisfaction; // 만족도
+  private Double avgSatisfaction; // 만족도
 }

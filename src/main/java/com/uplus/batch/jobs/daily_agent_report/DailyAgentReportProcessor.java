@@ -54,7 +54,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         .endAt(targetDate)
         .consultCount(metrics.getCount())
         .avgDurationMinutes(metrics.getAvgDuration() / 60.0) // 초 단위를 분 단위로 변환
-        .customerSatisfaction(metrics.getAvgSatisfaction()) // 고객 만족도 평균
+        .customerSatisfaction(metrics.getAvgSatisfaction() != null ? metrics.getAvgSatisfaction() : 0.0) // 고객 만족도 평균
         .categoryRanking(rankings)
         .build();
   }
