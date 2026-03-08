@@ -208,28 +208,74 @@ public class SummarySyncItemWriter implements ItemWriter<SummaryEventStatusRow> 
 
       switch (log.contractType()) {
 
-        case "NEW" -> subscribed.add(newProduct);
+        case "NEW" -> {
+          if (newProduct != null) {
+            subscribed.add(newProduct);
+          }
+        }
 
-        case "CANCEL" -> canceled.add(canceledProduct);
+        case "CANCEL" -> {
+          if (canceledProduct != null) {
+            canceled.add(canceledProduct);
+          }
+        }
 
-        case "CHANGE" ->
-            conversion.add(ResultProducts.Conversion.builder()
-                .subscribed(newProduct)
-                .canceled(canceledProduct)
-                .build());
+        case "CHANGE" -> {
+          conversion.add(
+              ResultProducts.Conversion.builder()
+                  .subscribed(newProduct)
+                  .canceled(canceledProduct)
+                  .build()
+          );
+        }
 
-        case "RENEW" -> recommitment.add(newProduct);
+        case "RENEW" -> {
+          if (newProduct != null) {
+            recommitment.add(newProduct);
+          }
+        }
       }
     }
 
-    return List.of(
-        ResultProducts.builder()
-            .subscribed(subscribed)
-            .canceled(canceled)
-            .conversion(conversion)
-            .recommitment(recommitment)
-            .build()
-    );
+    List<ResultProducts> results = new ArrayList<>();
+
+    if (!subscribed.isEmpty()) {
+      results.add(
+          ResultProducts.builder()
+              .subscribed(subscribed)
+              .changeType("NEW")
+              .build()
+      );
+    }
+
+    if (!canceled.isEmpty()) {
+      results.add(
+          ResultProducts.builder()
+              .canceled(canceled)
+              .changeType("CANCEL")
+              .build()
+      );
+    }
+
+    if (!conversion.isEmpty()) {
+      results.add(
+          ResultProducts.builder()
+              .conversion(conversion)
+              .changeType("CHANGE")
+              .build()
+      );
+    }
+
+    if (!recommitment.isEmpty()) {
+      results.add(
+          ResultProducts.builder()
+              .recommitment(recommitment)
+              .changeType("RENEW")
+              .build()
+      );
+    }
+
+    return results;
   }
 
   private String extractNewProduct(ConsultProductLogSyncRow log) {
