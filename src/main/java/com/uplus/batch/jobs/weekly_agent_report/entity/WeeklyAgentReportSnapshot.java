@@ -39,9 +39,9 @@ public class WeeklyAgentReportSnapshot {
 
   private double avgDurationMinutes; // 평균 소요 시간
 
-  private List<CategoryRanking> categoryRanking; // 처리 카테고리 순위
+  private double iamKeywordMatchAnalysis; // 주간 키워드 일치율
 
-  private double iamKeywordMatchAnalysis;
+  private List<CategoryRanking> categoryRanking; // 처리 카테고리 순위
 
   private QualityAnalysis qualityAnalysis;                // 상담사 응대 품질 분석
   private CustomerSatisfactionAnalysis customerSatisfactionAnalysis; // 고객 만족도 분석

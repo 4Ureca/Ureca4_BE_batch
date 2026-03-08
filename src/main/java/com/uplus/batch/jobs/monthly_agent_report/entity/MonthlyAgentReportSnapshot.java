@@ -59,7 +59,7 @@ public class MonthlyAgentReportSnapshot {
     private double personalizationRate;   // 고객 이름 포함 응대 비율(%)
     private double closingRate;           // 마무리 멘트 포함 비율(%)
     private double waitingGuideRate;      // 대기 안내 포함 비율(%)
-    private double totalScore;            // 응대 품질 종합 점수 (0~100)
+    private double totalScore;            // 응대 품질 종합 점수 (0~5)
   }
 
   @Data

@@ -14,6 +14,8 @@ public class DailyMetrics {
   private long completedSurveyCount; // Aggregation에서 받아올 값
   private double responseRate; // 응답률
 
+  private double avgIamMatchRate; // [추가] 쿼리 별명과 맞춤
+
 
   public void calculateResponseRate() {
     if (this.count > 0) {

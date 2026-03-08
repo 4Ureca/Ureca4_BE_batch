@@ -49,8 +49,8 @@ public class MonthlyAgentReportProcessor implements
     double totalDurationSum = 0;
     double totalSatisfactionSum = 0;
 
-    long totalSurveyTotalCount = 0;    // [추가] 월간 설문 요청 총합
-    long totalSurveyResponseCount = 0; // [추가] 월간 설문 응답 총합
+    long totalSurveyTotalCount = 0;    // 월간 설문 요청 총합
+    long totalSurveyResponseCount = 0; // 월간 설문 응답 총합
 
     Map<String, CategoryRanking> combinedRankings = new HashMap<>();
 
@@ -60,10 +60,9 @@ public class MonthlyAgentReportProcessor implements
 
       // 가중치 계산을 위한 합산 (건수가 0인 날은 제외됨)
       totalDurationSum += (day.getAvgDurationMinutes() * dayCount);
-//      totalSatisfactionSum += (day.getCustomerSatisfaction() * dayCount);
       totalSatisfactionSum += (day.getCustomerSatisfactionAnalysis().getSatisfactionScore() * dayCount);
 
-      // [추가] 일별 설문 카운트 합산 (가중 평균용)
+      // 일별 설문 카운트 합산 (가중 평균용)
       if (day.getCustomerSatisfactionAnalysis() != null) {
         totalSurveyTotalCount += day.getCustomerSatisfactionAnalysis().getSurveyTotalCount();
         totalSurveyResponseCount += day.getCustomerSatisfactionAnalysis().getSurveyResponseCount();
@@ -82,7 +81,7 @@ public class MonthlyAgentReportProcessor implements
     double monthlyAvgDuration = totalConsultCount > 0 ? totalDurationSum / totalConsultCount : 0;
     double monthlyAvgSatisfaction = totalConsultCount > 0 ? totalSatisfactionSum / totalConsultCount : 0;
 
-    // [추가] 월간 평균 응답률 계산
+    // 월간 평균 응답률 계산
     double monthlyAvgResponseRate = totalSurveyTotalCount > 0
         ? (double) totalSurveyResponseCount / totalSurveyTotalCount * 100.0 : 0;
 
@@ -102,13 +101,12 @@ public class MonthlyAgentReportProcessor implements
         .endAt(endAt)
         .consultCount(totalConsultCount)
         .avgDurationMinutes(monthlyAvgDuration) // 주간 가중 평균 소요 시간
-        .customerSatisfactionAnalysis( // [수정] 객체 구조로 변경
+        .customerSatisfactionAnalysis(
             MonthlyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
                 .satisfactionScore(monthlyAvgSatisfaction)
                 .responseRate(monthlyAvgResponseRate)
                 .build()
         )
-//        .customerSatisfaction(monthlyAvgSatisfaction) // 주간 가중 평균 만족도
         .categoryRanking(sortedRankings)
         .build();
   }

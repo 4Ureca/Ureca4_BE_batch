@@ -47,12 +47,12 @@ public class MonthlyAgentReportJobConfig {
 
   @Bean
   @StepScope
-  public ItemReader<Long> monthlyAgentIdReader() { // 1. 반환 타입을 Long으로 변경
+  public ItemReader<Long> monthlyAgentIdReader() {
     List<Long> agentIds = mongoTemplate.getCollection("consultation_summary")
-        .distinct("agent._id", Long.class) // 2. DB에서 Long 타입으로 추출
+        .distinct("agent._id", Long.class)
         .into(new ArrayList<Long>())
         .stream()
-        .collect(Collectors.toList()); // 3. String 변환 로직 삭제
+        .collect(Collectors.toList());
 
     return new ListItemReader<>(agentIds);
   }
