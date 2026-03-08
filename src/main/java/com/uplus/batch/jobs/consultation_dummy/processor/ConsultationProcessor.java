@@ -155,7 +155,9 @@ public class ConsultationProcessor implements ItemProcessor<Integer, Consultatio
     @PostConstruct
     public void init() {
         empIds = jdbcTemplate.queryForList(
-                "SELECT emp_id FROM employees WHERE is_active = 1", Integer.class);
+                "SELECT e.emp_id FROM employees e " +
+                "JOIN employee_details ed ON e.emp_id = ed.emp_id " +
+                "WHERE e.is_active = 1 AND ed.job_role_id = 1", Integer.class);
         customerIds = jdbcTemplate.queryForList(
                 "SELECT customer_id FROM customers", Long.class);
         categoryCodes = jdbcTemplate.queryForList(
