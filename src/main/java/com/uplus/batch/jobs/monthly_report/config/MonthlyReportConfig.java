@@ -1,6 +1,7 @@
 package com.uplus.batch.jobs.monthly_report.config;
 
 import com.uplus.batch.jobs.common.step.keyword.KeywordStatsTasklet;
+import com.uplus.batch.jobs.monthly_report.step.admin.ChurnDefenseStatsTasklet;
 import com.uplus.batch.jobs.monthly_report.step.admin.MonthlySubscriptionStatsTasklet;
 import com.uplus.batch.jobs.monthly_report.step.customer_risk.MonthlyCustomerRiskTasklet;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ public class MonthlyReportConfig {
   private final PlatformTransactionManager transactionManager;
   private final MonthlySubscriptionStatsTasklet monthlySubscriptionStatsTasklet;
   private final MonthlyCustomerRiskTasklet monthlyCustomerRiskTasklet;
+  private final ChurnDefenseStatsTasklet churnDefenseStatsTasklet;
   private final MongoTemplate mongoTemplate;
 
   @Bean
@@ -29,6 +31,7 @@ public class MonthlyReportConfig {
     return new JobBuilder("monthlyAdminReportJob", jobRepository) //
         .start(monthlySubscriptionStatsStep())
         .next(monthlyKeywordStatsStep())
+        .next(monthlyChurnDefenseStep())
         .next(monthlyCustomerRiskStep())
         .build();
   }
@@ -44,6 +47,13 @@ public class MonthlyReportConfig {
   public Step monthlyKeywordStatsStep() {
     return new StepBuilder("monthlyKeywordStatsStep", jobRepository)
         .tasklet(new KeywordStatsTasklet(mongoTemplate, "monthly_report_snapshot"), transactionManager)
+        .build();
+  }
+
+  @Bean
+  public Step monthlyChurnDefenseStep() {
+    return new StepBuilder("monthlyChurnDefenseStep", jobRepository)
+        .tasklet(churnDefenseStatsTasklet, transactionManager)
         .build();
   }
 

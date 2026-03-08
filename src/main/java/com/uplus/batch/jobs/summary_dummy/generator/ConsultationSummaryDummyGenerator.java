@@ -47,6 +47,7 @@ public class ConsultationSummaryDummyGenerator {
             .phone(row.getCustomerPhone())
             .grade(row.getGradeCode())
             .ageGroup(calculateAgeGroup(row.getBirthDate()))
+            .gender(random.nextBoolean() ? "남성" : "여성")
             .satisfiedScore(randomSatisfiedScore())
             .build()
     );
@@ -133,8 +134,16 @@ public class ConsultationSummaryDummyGenerator {
         .defenseAttempted(intent && random.nextBoolean())
         .defenseSuccess(intent && random.nextInt(100) < 50)
         .defenseActions(defense)
-        .complaintReasons(intent ? "요금 부담 증가" : null)
+        .complaintReasons(intent ? randomComplaintReason() : null)
         .build();
+  }
+
+  private static final List<String> COMPLAINT_REASONS = List.of(
+      "요금 불만", "서비스 품질 불만", "경쟁사 이동", "약정 만료", "단말기 불만", "부가서비스 불만"
+  );
+
+  private String randomComplaintReason() {
+    return COMPLAINT_REASONS.get(random.nextInt(COMPLAINT_REASONS.size()));
   }
 
   private String calculateAgeGroup(LocalDate birthDate) {

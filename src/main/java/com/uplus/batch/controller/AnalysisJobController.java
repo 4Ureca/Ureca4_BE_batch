@@ -27,6 +27,7 @@ public class AnalysisJobController {
     private final JobLauncher jobLauncher;
     private final Job customerRiskJob;
     private final Job hourlyConsultJob;
+    private final Job dailyPerformanceJob;
     private final Job weeklyPerformanceJob;
     private final Job monthlyPerformanceJob;
 
@@ -97,6 +98,31 @@ public class AnalysisJobController {
 
         return ResponseEntity.ok("HourlyConsult job started (targetDate=" + targetDate + ", slot=" + slot + ")");
     }
+
+    /**
+     * 일별 전체 상담 성과 집계 Job 실행
+     * * @param date 집계 날짜 (yyyy-MM-dd)
+     * * curl -X POST "http://localhost:8081/api/jobs/daily-performance?date=2025-01-15"
+     */
+    @PostMapping("/daily-performance")
+    public ResponseEntity<String> runDailyPerformance(
+        @RequestParam String date
+    ) throws Exception {
+
+        JobParameters params = new JobParametersBuilder()
+            .addLong("runId", System.currentTimeMillis())
+            .addString("startDate", date) // 시작일과
+            .addString("endDate", date)   // 종료일을 동일하게 설정
+            .addString("targetCollection", "daily_report_snapshot") // 대상 컬렉션 지정
+            .toJobParameters();
+
+        log.info("[AnalysisJob] dailyPerformanceJob 수동 실행 요청 — {}", date);
+        // DailyReportJobConfig에서 정의한 dailyPerformanceJob을 호출합니다.
+        jobLauncher.run(dailyPerformanceJob, params);
+
+        return ResponseEntity.ok("DailyPerformance job started for " + date);
+    }
+
 
     /**
      * 주간 전체 상담 성과 집계 Job 실행
