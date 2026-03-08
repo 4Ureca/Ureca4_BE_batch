@@ -55,7 +55,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         .iamKeywordMatchAnalysis(metrics.getAvgIamMatchRate())
         .customerSatisfactionAnalysis(
             DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
-                .satisfactionScore(metrics.getAvgSatisfaction())
+                .satisfactionScore(metrics.getAvgSatisfaction() != null ? metrics.getAvgSatisfaction() : 0.0)
                 // 응답률 계산: (응답건수 / 전체건수) * 100
                 .responseRate(metrics.getCount() > 0
                     ? (double) metrics.getCompletedSurveyCount() / metrics.getCount() * 100.0 : 0)
