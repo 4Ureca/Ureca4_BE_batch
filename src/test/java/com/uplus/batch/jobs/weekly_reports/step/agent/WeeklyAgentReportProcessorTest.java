@@ -4,6 +4,8 @@ import com.uplus.batch.jobs.daily_agent_report.entity.CategoryRanking;
 import com.uplus.batch.jobs.daily_agent_report.entity.DailyAgentReportSnapshot;
 import com.uplus.batch.jobs.weekly_agent_report.WeeklyAgentReportProcessor;
 import com.uplus.batch.jobs.weekly_agent_report.entity.WeeklyAgentReportSnapshot;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,8 +17,10 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 
 import static org.assertj.core.api.Assertions.assertThat; // [해결] assertThat static import 추가
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("WeeklyAgentReportProcessor 로직 테스트")
@@ -32,7 +36,7 @@ class WeeklyAgentReportProcessorTest {
   @DisplayName("7일치 일별 데이터가 있을 때 -> 정상 합산 및 순위 재정렬 확인")
   void process_WeeklyAggregation_Success() {
     // 1. Given: 가짜 일별 데이터(DailyAgentReportSnapshot) 생성
-    String agentId = "101";
+    Long agentId = 101L;
 
     // 첫 번째 날: CODE_A(5건), CODE_B(3건)
     DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
@@ -85,8 +89,73 @@ class WeeklyAgentReportProcessorTest {
         eq(DailyAgentReportSnapshot.class)
     )).thenReturn(List.of());
 
-    WeeklyAgentReportSnapshot result = processor.process("999");
+    WeeklyAgentReportSnapshot result = processor.process(999L);
 
     assertThat(result).isNull();
   }
+
+  // 전체 상담 성과 테스트
+  @Test
+  void 주별_보고서_가중평균_계산_테스트() {
+    // given
+    Long agentId = 101L;
+
+    // 카테고리 랭킹이 null이 되지 않도록 빈 리스트를 넣음.
+    DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
+        .consultCount(10)
+        .avgDurationMinutes(5.0)
+        .customerSatisfaction(4.0)
+        .categoryRanking(new ArrayList<>()) // 이 부분이 누락되어 NPE 발생
+        .build();
+
+    DailyAgentReportSnapshot day2 = DailyAgentReportSnapshot.builder()
+        .consultCount(20)
+        .avgDurationMinutes(8.0)
+        .customerSatisfaction(5.0)
+        .categoryRanking(new ArrayList<>())
+        .build();
+
+    when(mongoTemplate.find(any(Query.class), eq(DailyAgentReportSnapshot.class)))
+        .thenReturn(List.of(day1, day2));
+
+    // when
+    WeeklyAgentReportSnapshot result = processor.process(agentId);
+
+    // then
+    assertEquals(7.0, result.getAvgDurationMinutes());
+    // (4*10 + 5*20) / 30 = 4.666...
+    assertEquals(4.66, result.getCustomerSatisfaction(), 0.01);
+  }
+
+  @Test
+  void 데이터가_없는_경우_null_반환_테스트() {
+    // given
+    when(mongoTemplate.find(any(Query.class), eq(DailyAgentReportSnapshot.class)))
+        .thenReturn(Collections.emptyList()); // 빈 리스트 반환
+
+    // when
+    WeeklyAgentReportSnapshot result = processor.process(101L);
+
+    // then
+    assertNull(result); // 에러 없이 null이 나오는지 확인
+  }
+
+  @Test
+  void 만족도_응답이_전혀_없는_경우_0점_반환_테스트() {
+    // given
+    DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
+        .consultCount(10).avgDurationMinutes(5.0)
+        .customerSatisfaction(0.0) // 만족도 응답 없음
+        .categoryRanking(new ArrayList<>()).build();
+
+    when(mongoTemplate.find(any(Query.class), eq(DailyAgentReportSnapshot.class)))
+        .thenReturn(List.of(day1));
+
+    // when
+    WeeklyAgentReportSnapshot result = processor.process(101L);
+
+    // then
+    assertEquals(0.0, result.getCustomerSatisfaction()); // 0으로 안전하게 떨어지는지 확인
+  }
+
 }

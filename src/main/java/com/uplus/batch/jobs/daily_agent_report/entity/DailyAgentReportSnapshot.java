@@ -23,7 +23,7 @@ public class DailyAgentReportSnapshot {
   @Id
   private String id;
 
-  private String agentId;      // 상담사 식별자 (ID)
+  private Long agentId;      // 상담사 식별자 (ID)
 
   private LocalDate startAt;   // 집계 시작 일자 (해당일 00:00:00)
 
@@ -34,6 +34,8 @@ public class DailyAgentReportSnapshot {
   private double avgConsultPerAgent; // 상담사 평균 처리 건수 (전체 평균 대비 비교용)
 
   private double avgDurationMinutes; // 개인 평균 상담 소요 시간 (분 단위)
+
+  private double customerSatisfaction; // 고객 만족도
 
   private double iamWriteRate; // 상담 완료 대비 IAM 작성 비율 (%)
 
