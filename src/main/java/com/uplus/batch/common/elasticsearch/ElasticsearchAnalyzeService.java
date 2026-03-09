@@ -21,7 +21,7 @@ public class ElasticsearchAnalyzeService {
     AnalyzeResponse response = elasticsearchClient.indices().analyze(
         AnalyzeRequest.of(a -> a
             .index("consult-index")
-            .analyzer("consult_index_analyzer")
+            .analyzer("korean_index_analyzer")
             .text(text)
         )
     );

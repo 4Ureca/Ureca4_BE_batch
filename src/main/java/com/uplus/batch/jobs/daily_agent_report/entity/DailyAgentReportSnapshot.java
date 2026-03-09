@@ -27,6 +27,8 @@ public class DailyAgentReportSnapshot {
   @Indexed
   private Long agentId;      // 상담사 식별자 (ID)
 
+  private String agentName;    // 상담사 이름
+
   private LocalDate startAt;   // 집계 시작 일자
 
   private LocalDate endAt;     // 집계 종료 일자

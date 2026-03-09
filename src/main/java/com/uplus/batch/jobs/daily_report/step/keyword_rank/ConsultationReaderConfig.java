@@ -55,7 +55,7 @@ public class ConsultationReaderConfig {
           String speaker = node.path("speaker").asText("");
           if (!"고객".equals(speaker)) continue;
 
-          String msg = node.path("message").asText("");
+          String msg = node.path("text").asText("");
           if (msg.length() < 2) continue;
 
           fullText.append(msg).append(" ");

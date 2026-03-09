@@ -89,9 +89,13 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
     // 3. 응대 품질 분석
     QualityAnalysis qualityAnalysis = analyzeQuality(agentId, targetDate);
 
-    // 4. 스냅샷 객체 생성
+    // 4. 상담사 이름 조회
+    String agentName = findAgentName(agentId, targetDate);
+
+    // 5. 스냅샷 객체 생성
     return DailyAgentReportSnapshot.builder()
         .agentId(agentId)
+        .agentName(agentName)
         .startAt(targetDate)
         .endAt(targetDate)
         .consultCount(metrics.getCount())
@@ -257,6 +261,32 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
 
   private double round1(double value) {
     return Math.round(value * 10.0) / 10.0;
+  }
+
+  // ==================== 상담사 이름 조회 ====================
+
+  /**
+   * consultation_summary에서 상담사 이름을 조회한다.
+   */
+  private String findAgentName(Long agentId, LocalDate date) {
+    LocalDateTime startDt = date.atStartOfDay();
+    LocalDateTime endDt = date.atTime(LocalTime.MAX);
+
+    Query query = new Query(
+        Criteria.where("agent._id").is(agentId)
+            .and("consultedAt").gte(startDt).lte(endDt)
+    );
+    query.fields().include("agent.name");
+    query.limit(1);
+
+    Document doc = mongoTemplate.findOne(query, Document.class, "consultation_summary");
+    if (doc != null) {
+      Document agentDoc = doc.get("agent", Document.class);
+      if (agentDoc != null) {
+        return agentDoc.getString("name");
+      }
+    }
+    return null;
   }
 
   // ==================== 카테고리 집계 ====================
