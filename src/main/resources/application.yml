@@ -13,6 +13,7 @@ spring:
   data:
     mongodb:
       uri: mongodb://localhost:27018/crm
+
     redis:
       host: localhost
       port: 6380
@@ -20,16 +21,10 @@ spring:
   elasticsearch:
     uris: http://localhost:9201
 
-  kafka:
-    consumer:
-      group-id: crm-group
-      auto-offset-reset: earliest
-    producer:
-      acks: all
-
 server:
   port: 8081
-  
-gemini:
-  api:
-    key: ${GEMINI_API_KEY}
+
+app:
+  summary-sync:
+    cron: "0 * * * * *"
+    batch-size: 100

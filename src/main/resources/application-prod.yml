@@ -8,6 +8,17 @@ spring:
     mongodb:
       uri: ${MONGO_URI}
 
+    redis:
+      host: ${REDIS_URI}
+      port: ${REDIS_PORT}
+
+  elasticsearch:
+    uris: ${ES_URI}
+
+gemini:
+  api:
+    key: ${GEMINI_API_KEY}
+
 logging:
   level:
     root: INFO
