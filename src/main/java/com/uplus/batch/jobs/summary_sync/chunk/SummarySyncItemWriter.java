@@ -154,7 +154,7 @@ public class SummarySyncItemWriter implements ItemWriter<SummaryEventStatusRow> 
     // ES 문서 빌드
     String allText = searchDocBuilder.buildAllText(row, retentionRow, productNames, keywordResult);
     searchDocs.add(searchDocBuilder.buildSearchDoc(
-        consultId, row, retentionRow, riskFlags.get(consultId), productCodes, keywordResult, allText));
+        consultId, row, retentionRow, riskFlags.get(consultId), productCodes, allText));
     keywordDocs.add(searchDocBuilder.buildKeywordDoc(consultId, row, mergedText));
   }
 
