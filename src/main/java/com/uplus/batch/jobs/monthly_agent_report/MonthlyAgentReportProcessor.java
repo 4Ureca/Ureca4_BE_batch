@@ -131,7 +131,7 @@ public class MonthlyAgentReportProcessor implements
 
     for (DailyAgentReportSnapshot day : withQuality) {
       QualityAnalysis q = day.getQualityAnalysis();
-      long dayCount = day.getConsultCount();
+      long dayCount = q.getAnalyzedCount();
       qualityConsultCount += dayCount;
 
       totalEmpathy += q.getEmpathyCount();

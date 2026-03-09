@@ -15,7 +15,6 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,11 +58,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
   private static final String TOKEN_COURTESY = "친절응대";
   private static final String TOKEN_PROMPTNESS = "신속응대";
   private static final String TOKEN_ACCURACY = "정확응대";
-
-  /** 대기 안내 복합어 토큰 (analysis_userdict.txt에서 분해 방지) */
-  private static final Set<String> WAITING_GUIDE_TOKENS = Set.of(
-      "잠시만기다려주세요", "확인해드리겠습니다",
-      "안내해드리겠습니다", "처리해드리겠습니다", "연결해드리겠습니다");
+  private static final String TOKEN_WAITING = "대기안내";
 
   // === totalScore 가중치 (합계 = 1.0, 결과 × 5.0 = 5점 만점) ===
   private static final double W_EMPATHY = 0.20;
@@ -164,7 +159,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
       if (tokens.contains(TOKEN_COURTESY)) courtesyCount++;
       if (tokens.contains(TOKEN_PROMPTNESS)) promptnessCount++;
       if (tokens.contains(TOKEN_ACCURACY)) accuracyCount++;
-      if (tokens.stream().anyMatch(WAITING_GUIDE_TOKENS::contains)) waitingGuideCount++;
+      if (tokens.contains(TOKEN_WAITING)) waitingGuideCount++;
     }
 
     if (analyzedCount == 0) {
@@ -195,6 +190,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         agentId, analyzedCount, empathyTotal, apologyRate, closingRate, totalScore);
 
     return QualityAnalysis.builder()
+        .analyzedCount(analyzedCount)
         .empathyCount(empathyTotal)
         .avgEmpathyPerConsult(avgEmpathy)
         .apologyRate(apologyRate)

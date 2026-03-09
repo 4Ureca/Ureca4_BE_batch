@@ -55,6 +55,7 @@ public class DailyAgentReportSnapshot {
   @AllArgsConstructor
   @Builder
   public static class QualityAnalysis {
+    private int analyzedCount;            // 실제 분석 완료 상담 건수 (주별/월별 가중 평균 분모용)
     private long empathyCount;            // 공감 표현 등장 총 횟수
     private double avgEmpathyPerConsult;  // 건당 평균 공감 횟수
     private double apologyRate;           // 사과 표현 포함 비율 (%)
