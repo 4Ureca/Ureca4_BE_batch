@@ -11,13 +11,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * 고객 특이사항 집계 배치 Job 설정 (단일 Step)
+ * 고객 특이사항 집계 배치 Job 설정
+ *
+ * Step 1: customerRiskStep — 위험 유형별 건수 집계 -> MongoDB 저장
  *
  * 실행:
- *   curl -X POST "http://localhost:8081/api/analysis/jobs/customer-risk?targetDate=2025-01-15"
- *
- * 나중에 dailyReportJob에 합칠 때 이 Config 제거하고
- * DailyReportJobConfig에서 customerRiskStep만 가져다 쓰면 됨.
+ *   curl -X POST "http://localhost:8081/api/jobs/customer-risk?targetDate=2025-01-15"
  */
 @Configuration
 @RequiredArgsConstructor
