@@ -60,6 +60,12 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
     long totalConsultCount = 0;
     double totalDurationSum = 0; // (평균 시간 * 건수)의 합산
     double totalSatisfactionSum = 0; // (만족도 * 건수)의 합산
+
+    long totalSurveyTotalCount = 0;    // 주간 전체 설문 요청 수 합산용
+    long totalSurveyResponseCount = 0; // 주간 전체 설문 응답 수 합산용
+
+    double totalIamMatchRateSum = 0; // IAM 일치율 합산 변수
+
     Map<String, CategoryRanking> combinedRankings = new HashMap<>();
 
     for (DailyAgentReportSnapshot day : dailySnapshots) {
@@ -68,7 +74,17 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
 
       // 가중치 계산을 위한 합산 (건수가 0인 날은 제외됨)
       totalDurationSum += (day.getAvgDurationMinutes() * dayCount);
-      totalSatisfactionSum += (day.getCustomerSatisfaction() * dayCount);
+      totalSatisfactionSum += (day.getCustomerSatisfactionAnalysis().getSatisfactionScore() * dayCount);
+
+      // 일별 일치율 * 상담건수 합산
+      totalIamMatchRateSum += (day.getIamKeywordMatchAnalysis() * dayCount);
+
+      // 일별 응답률 daily 합산
+      if (day.getCustomerSatisfactionAnalysis() != null) {
+        totalSurveyTotalCount += day.getCustomerSatisfactionAnalysis().getSurveyTotalCount();
+        totalSurveyResponseCount += day.getCustomerSatisfactionAnalysis().getSurveyResponseCount();
+      }
+
 
       // 카테고리 랭킹 합산 로직
       for (CategoryRanking r : day.getCategoryRanking()) {
@@ -79,9 +95,21 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
       }
     }
 
+<<<<<<< feat/CV4-80
     // 3. 최종 평균 지표 산출
+=======
+    // 주간 평균 응답률 산출
+    double weeklyAvgResponseRate = totalSurveyTotalCount > 0
+        ? (double) totalSurveyResponseCount / totalSurveyTotalCount * 100.0
+        : 0;
+
+    // 3. 최종 평균 지표 산출 (전체 건수로 나눔)
+>>>>>>> develop
     double weeklyAvgDuration = totalConsultCount > 0 ? totalDurationSum / totalConsultCount : 0;
     double weeklyAvgSatisfaction = totalConsultCount > 0 ? totalSatisfactionSum / totalConsultCount : 0;
+
+    // 주간 가중 평균 일치율 계산
+    double weeklyIamMatchRate = totalConsultCount > 0 ? totalIamMatchRateSum / totalConsultCount : 0;
 
     // 4. 카테고리 재정렬 및 순위 부여
     List<CategoryRanking> sortedRankings = combinedRankings.values().stream()
@@ -102,8 +130,19 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
         .startAt(startAt)
         .endAt(endAt)
         .consultCount(totalConsultCount)
+<<<<<<< feat/CV4-80
         .avgDurationMinutes(weeklyAvgDuration)
         .customerSatisfaction(weeklyAvgSatisfaction)
+=======
+        .avgDurationMinutes(weeklyAvgDuration) // 주간 가중 평균 소요 시간
+        .iamKeywordMatchAnalysis(weeklyIamMatchRate) // 최종 주간 일치율 반영
+        .customerSatisfactionAnalysis(
+            WeeklyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(weeklyAvgSatisfaction) // 주간 평균 만족도 점수
+                .responseRate(weeklyAvgResponseRate)    // 주간 평균 응답률
+                .build()
+        )
+>>>>>>> develop
         .categoryRanking(sortedRankings)
         .qualityAnalysis(weeklyQuality)
         .build();

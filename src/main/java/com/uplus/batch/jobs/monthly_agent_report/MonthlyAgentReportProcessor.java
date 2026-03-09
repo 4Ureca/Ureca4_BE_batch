@@ -60,6 +60,10 @@ public class MonthlyAgentReportProcessor implements
     long totalConsultCount = 0;
     double totalDurationSum = 0;
     double totalSatisfactionSum = 0;
+
+    long totalSurveyTotalCount = 0;    // 월간 설문 요청 총합
+    long totalSurveyResponseCount = 0; // 월간 설문 응답 총합
+
     Map<String, CategoryRanking> combinedRankings = new HashMap<>();
 
     for (DailyAgentReportSnapshot day : dailySnapshots) {
@@ -68,7 +72,13 @@ public class MonthlyAgentReportProcessor implements
 
       // 가중치 계산을 위한 합산 (건수가 0인 날은 제외됨)
       totalDurationSum += (day.getAvgDurationMinutes() * dayCount);
-      totalSatisfactionSum += (day.getCustomerSatisfaction() * dayCount);
+      totalSatisfactionSum += (day.getCustomerSatisfactionAnalysis().getSatisfactionScore() * dayCount);
+
+      // 일별 설문 카운트 합산 (가중 평균용)
+      if (day.getCustomerSatisfactionAnalysis() != null) {
+        totalSurveyTotalCount += day.getCustomerSatisfactionAnalysis().getSurveyTotalCount();
+        totalSurveyResponseCount += day.getCustomerSatisfactionAnalysis().getSurveyResponseCount();
+      }
 
       // 처리 카테고리 순위 및 건수
       for (CategoryRanking r : day.getCategoryRanking()) {
@@ -82,6 +92,10 @@ public class MonthlyAgentReportProcessor implements
     // 3. 최종 월별 지표 산출
     double monthlyAvgDuration = totalConsultCount > 0 ? totalDurationSum / totalConsultCount : 0;
     double monthlyAvgSatisfaction = totalConsultCount > 0 ? totalSatisfactionSum / totalConsultCount : 0;
+
+    // 월간 평균 응답률 계산
+    double monthlyAvgResponseRate = totalSurveyTotalCount > 0
+        ? (double) totalSurveyResponseCount / totalSurveyTotalCount * 100.0 : 0;
 
     // 4. 카테고리 재정렬 및 순위 부여
     List<CategoryRanking> sortedRankings = combinedRankings.values().stream()
@@ -102,8 +116,18 @@ public class MonthlyAgentReportProcessor implements
         .startAt(startAt)
         .endAt(endAt)
         .consultCount(totalConsultCount)
+<<<<<<< feat/CV4-80
         .avgDurationMinutes(monthlyAvgDuration)
         .customerSatisfaction(monthlyAvgSatisfaction)
+=======
+        .avgDurationMinutes(monthlyAvgDuration) // 주간 가중 평균 소요 시간
+        .customerSatisfactionAnalysis(
+            MonthlyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(monthlyAvgSatisfaction)
+                .responseRate(monthlyAvgResponseRate)
+                .build()
+        )
+>>>>>>> develop
         .categoryRanking(sortedRankings)
         .qualityAnalysis(monthlyQuality)
         .build();
