@@ -32,12 +32,7 @@ public class SyntheticDataGeneratorScheduler {
     private final EventStatusRepository eventStatusRepository;
     private final FailureAlertService alertService;
 
-    /**
-     * 동일 JVM 내 중복 실행 방지 플래그.
-     * TODO: 멀티 인스턴스 환경에서는 ShedLock 교체 필요
-     *   의존성 추가: net.javacrumbs.shedlock:shedlock-spring + shedlock-provider-jdbc-template
-     *   어노테이션 교체: @SchedulerLock(name = "SyntheticDataGenerator", lockAtMostFor = "4m", lockAtLeastFor = "1m")
-     */
+    /** 동일 JVM 내 중복 실행 방지 플래그. 단일 인스턴스 배포 기준으로 충분. */
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     @Scheduled(fixedDelayString = "${synthetic-data.fixed-delay:300000}")

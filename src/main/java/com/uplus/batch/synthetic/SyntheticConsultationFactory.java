@@ -1,5 +1,6 @@
 package com.uplus.batch.synthetic;
 
+import com.uplus.batch.common.dummy.dto.CacheDummy;
 import com.uplus.batch.domain.summary.entity.SummaryEventStatus;
 import com.uplus.batch.domain.summary.repository.SummaryEventStatusRepository;
 import com.uplus.batch.jobs.raw_text_dummy.generator.RawTextGenerator;
@@ -49,6 +50,12 @@ public class SyntheticConsultationFactory {
     private final RawTextGenerator rawTextGenerator;
     private final JdbcTemplate jdbcTemplate;
     private final SummaryEventStatusRepository summaryEventStatusRepo;
+    private final CacheDummy cacheDummy;
+
+    // ── 위험 유형·등급 (risk_type_policy / risk_level_policy 참조) ─────────
+    private static final List<String> RISK_TYPES  = List.of("CHURN","FRAUD","PHISHING","ABUSE","COMP");
+    // LOW 가중치 높게 (실제 분포 반영)
+    private static final List<String> RISK_LEVELS = List.of("LOW","LOW","LOW","MEDIUM","MEDIUM","HIGH","CRITICAL");
 
     // ─── IAM 템플릿 (카테고리 접두사 → [iam_issue, iam_action, iam_memo]) ─────────────
     private static final Map<String, List<String[]>> IAM_TEMPLATES = Map.of(
@@ -111,8 +118,11 @@ public class SyntheticConsultationFactory {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
-        List<Long>   consultIds    = new ArrayList<>(batchSize);
-        List<String> categoryCodes = new ArrayList<>(batchSize);
+        List<Long>    consultIds    = new ArrayList<>(batchSize);
+        List<String>  categoryCodes = new ArrayList<>(batchSize);
+        List<String>  channels      = new ArrayList<>(batchSize);
+        List<Integer> empIds        = new ArrayList<>(batchSize);
+        List<Long>    customerIds   = new ArrayList<>(batchSize);
 
         for (int i = 0; i < batchSize; i++) {
             var agent    = agents.get(random.nextInt(agents.size()));
@@ -155,6 +165,9 @@ public class SyntheticConsultationFactory {
 
             consultIds.add(keyHolder.getKey().longValue());
             categoryCodes.add(categoryCode);
+            channels.add(channel);
+            empIds.add(empId);
+            customerIds.add(customerId);
         }
 
         // ── consultation_raw_texts Bulk INSERT ──
@@ -162,7 +175,7 @@ public class SyntheticConsultationFactory {
         for (int i = 0; i < batchSize; i++) {
             rawArgs.add(new Object[]{
                     consultIds.get(i),
-                    rawTextGenerator.generate(categoryCodes.get(i),
+                    rawTextGenerator.generate(categoryCodes.get(i), channels.get(i),
                             new java.util.Random(ThreadLocalRandom.current().nextLong()))
             });
         }
@@ -170,6 +183,11 @@ public class SyntheticConsultationFactory {
                 "INSERT INTO consultation_raw_texts (consult_id, raw_text_json) VALUES (?, ?)",
                 rawArgs
         );
+
+        // ── 연관 테이블 Bulk INSERT (같은 트랜잭션) ───────────────────────
+        insertClientReviews(consultIds, random);
+        insertCustomerRiskLogs(consultIds, empIds, customerIds, categoryCodes, random);
+        insertProductLogs(consultIds, customerIds, categoryCodes, random);
 
         log.info("[SyntheticFactory] Step1 완료 — consultation_results: {}건, raw_texts: {}건 | " +
                         "consultId 범위: {} ~ {}",
@@ -214,6 +232,162 @@ public class SyntheticConsultationFactory {
     // ─────────────────────────────────────────────────────────
     //  내부 DTO
     // ─────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────
+    //  연관 테이블 INSERT 헬퍼
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * client_review — 고객 만족도 평가 (70% 확률로 생성).
+     * score_1~5: 1~5점 랜덤, score_average: 평균.
+     */
+    private void insertClientReviews(List<Long> consultIds, ThreadLocalRandom random) {
+        List<Object[]> args = new ArrayList<>();
+        for (Long consultId : consultIds) {
+            if (random.nextInt(100) >= 70) continue; // 30% 미응답
+
+            int s1 = 1 + random.nextInt(5);
+            int s2 = 1 + random.nextInt(5);
+            int s3 = 1 + random.nextInt(5);
+            int s4 = 1 + random.nextInt(5);
+            int s5 = 1 + random.nextInt(5);
+            double avg = Math.round((s1 + s2 + s3 + s4 + s5) / 5.0 * 10) / 10.0;
+            args.add(new Object[]{consultId, s1, s2, s3, s4, s5, avg});
+        }
+        if (!args.isEmpty()) {
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO client_review (consult_id, score_1, score_2, score_3, score_4, score_5, score_average) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    args
+            );
+        }
+    }
+
+    /**
+     * customer_risk_logs — 위험 고객 감지 로그 (40% 확률로 생성).
+     * CHN 카테고리는 CHURN 유형 우선, 나머지는 랜덤.
+     */
+    private void insertCustomerRiskLogs(List<Long> consultIds, List<Integer> empIds,
+                                        List<Long> customerIds, List<String> categoryCodes,
+                                        ThreadLocalRandom random) {
+        List<Object[]> args = new ArrayList<>();
+        for (int i = 0; i < consultIds.size(); i++) {
+            if (random.nextInt(100) >= 40) continue; // 60% 해당 없음
+
+            String typeCode;
+            if (categoryCodes.get(i).contains("CHN")) {
+                // CHN은 CHURN 60%, 나머지 40%
+                typeCode = random.nextInt(100) < 60 ? "CHURN"
+                        : RISK_TYPES.get(random.nextInt(RISK_TYPES.size()));
+            } else {
+                typeCode = RISK_TYPES.get(random.nextInt(RISK_TYPES.size()));
+            }
+            String levelCode = RISK_LEVELS.get(random.nextInt(RISK_LEVELS.size()));
+
+            args.add(new Object[]{consultIds.get(i), empIds.get(i), customerIds.get(i), typeCode, levelCode});
+        }
+        if (!args.isEmpty()) {
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO customer_risk_logs (consult_id, emp_id, customer_id, type_code, level_code) " +
+                    "VALUES (?, ?, ?, ?, ?)",
+                    args
+            );
+        }
+    }
+
+    /**
+     * consult_product_logs — 상담 중 처리된 상품 변경 이력.
+     * 60% 확률로 1건, 20% 확률로 2건, 20% 0건.
+     * contract_type에 따라 new/canceled 컬럼을 구분하여 삽입.
+     */
+    private void insertProductLogs(List<Long> consultIds, List<Long> customerIds,
+                                   List<String> categoryCodes, ThreadLocalRandom random) {
+        boolean hasCodes = cacheDummy.getHomeProductCodes() != null && !cacheDummy.getHomeProductCodes().isEmpty()
+                && cacheDummy.getMobileProductCodes() != null && !cacheDummy.getMobileProductCodes().isEmpty()
+                && cacheDummy.getAdditionalProductCodes() != null && !cacheDummy.getAdditionalProductCodes().isEmpty();
+        if (!hasCodes) return;
+
+        List<Object[]> args = new ArrayList<>();
+        String[] contractTypes = {"NEW", "CANCEL", "CHANGE", "RENEW"};
+        String[] productTypes  = {"home", "mobile", "additional"};
+
+        for (int i = 0; i < consultIds.size(); i++) {
+            int logCount;
+            int roll = random.nextInt(100);
+            if (roll < 20) continue;          // 20% 상품 변경 없음
+            else if (roll < 80) logCount = 1; // 60% 1건
+            else logCount = 2;                // 20% 2건
+
+            for (int j = 0; j < logCount; j++) {
+                // CHN은 RENEW/CANCEL 위주, 나머지는 랜덤
+                String contractType;
+                if (categoryCodes.get(i).contains("CHN")) {
+                    contractType = random.nextBoolean() ? "RENEW" : "CANCEL";
+                } else {
+                    contractType = contractTypes[random.nextInt(contractTypes.length)];
+                }
+                String productType = productTypes[random.nextInt(productTypes.length)];
+                String code1 = pickProductCode(productType, random);
+                String code2 = "CHANGE".equals(contractType) ? pickDifferentCode(productType, code1, random) : null;
+
+                args.add(buildProductLogArgs(
+                        consultIds.get(i), customerIds.get(i),
+                        contractType, productType, code1, code2));
+            }
+        }
+        if (!args.isEmpty()) {
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO consult_product_logs " +
+                    "(consult_id, customer_id, contract_type, product_type, " +
+                    "new_product_home, new_product_mobile, new_product_service, " +
+                    "canceled_product_home, canceled_product_mobile, canceled_product_service) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    args
+            );
+        }
+    }
+
+    /** product_type × contract_type 조합으로 10개 컬럼 Object[] 생성 */
+    private Object[] buildProductLogArgs(long consultId, long customerId,
+                                         String contractType, String productType,
+                                         String code1, String code2) {
+        // [new_home, new_mobile, new_service, cancel_home, cancel_mobile, cancel_service]
+        String[] cols = new String[6];
+        int newIdx    = switch (productType) { case "home" -> 0; case "mobile" -> 1; default -> 2; };
+        int cancelIdx = newIdx + 3;
+
+        boolean isNew    = "NEW".equals(contractType) || "RENEW".equals(contractType);
+        boolean isCancel = "CANCEL".equals(contractType);
+        boolean isChange = "CHANGE".equals(contractType);
+
+        if (isNew)    cols[newIdx]    = code1;
+        if (isCancel) cols[cancelIdx] = code1;
+        if (isChange) { cols[newIdx] = code1; cols[cancelIdx] = code2; }
+
+        return new Object[]{consultId, customerId, contractType, productType,
+                cols[0], cols[1], cols[2], cols[3], cols[4], cols[5]};
+    }
+
+    private String pickProductCode(String productType, ThreadLocalRandom random) {
+        List<String> pool = switch (productType) {
+            case "home"       -> cacheDummy.getHomeProductCodes();
+            case "mobile"     -> cacheDummy.getMobileProductCodes();
+            default           -> cacheDummy.getAdditionalProductCodes();
+        };
+        return pool.get(random.nextInt(pool.size()));
+    }
+
+    private String pickDifferentCode(String productType, String exclude, ThreadLocalRandom random) {
+        List<String> pool = switch (productType) {
+            case "home"   -> cacheDummy.getHomeProductCodes();
+            case "mobile" -> cacheDummy.getMobileProductCodes();
+            default       -> cacheDummy.getAdditionalProductCodes();
+        };
+        if (pool.size() == 1) return pool.get(0); // 단일 코드면 그대로
+        String code;
+        do { code = pool.get(random.nextInt(pool.size())); } while (code.equals(exclude));
+        return code;
+    }
 
     public record BatchResult(List<Long> consultIds, List<String> categoryCodes) {
         public boolean isEmpty() { return consultIds.isEmpty(); }
