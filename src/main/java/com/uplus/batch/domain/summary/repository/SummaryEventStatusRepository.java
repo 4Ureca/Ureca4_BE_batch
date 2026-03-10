@@ -29,7 +29,7 @@ public class SummaryEventStatusRepository {
     return SummaryEventStatus.reconstruct(
         rs.getLong("id"),
         rs.getLong("consult_id"),
-        EventStatus.valueOf(rs.getString("status")),
+        rs.getString("status"),
         rs.getInt("retry_count"),
         rs.getString("fail_reason"),
         ca != null ? ca.toLocalDateTime() : null,
@@ -63,7 +63,7 @@ public class SummaryEventStatusRepository {
   public void save(SummaryEventStatus entity) {
     jdbcTemplate.update(
         "UPDATE summary_event_status SET status = ?, retry_count = ?, fail_reason = ?, updated_at = NOW() WHERE id = ?",
-        entity.getStatus().name(),
+        entity.getStatus(),
         entity.getRetryCount(),
         entity.getFailReason(),
         entity.getSummaryEventId()
@@ -91,7 +91,7 @@ public class SummaryEventStatusRepository {
           toInsert.size(),
           (ps, e) -> {
             ps.setLong(1, e.getConsultId());
-            ps.setString(2, e.getStatus().name());
+            ps.setString(2, e.getStatus());
             ps.setInt(3, e.getRetryCount());
             ps.setString(4, e.getFailReason());
           }
@@ -104,7 +104,7 @@ public class SummaryEventStatusRepository {
           toUpdate,
           toUpdate.size(),
           (ps, e) -> {
-            ps.setString(1, e.getStatus().name());
+            ps.setString(1, e.getStatus());
             ps.setInt(2, e.getRetryCount());
             ps.setString(3, e.getFailReason());
             ps.setLong(4, e.getSummaryEventId());
