@@ -59,11 +59,21 @@ public class SearchDocBuilder {
   public IndexQuery buildKeywordDoc(
       Long consultId,
       ConsultationResultSyncRow row,
-      String mergedText
+      List<Map<String, Object>> messages
   ) {
-    Map<String, Object> doc = new HashMap<>();
+    String agentText = messages.stream()
+        .filter(m -> "상담사".equals(m.get("speaker")))
+        .map(m -> (String) m.get("text"))
+        .collect(java.util.stream.Collectors.joining(" "));
 
-    doc.put("content", mergedText);
+    String customerText = messages.stream()
+        .filter(m -> "고객".equals(m.get("speaker")))
+        .map(m -> (String) m.get("text"))
+        .collect(java.util.stream.Collectors.joining(" "));
+
+    Map<String, Object> doc = new HashMap<>();
+    doc.put("agent", agentText);
+    doc.put("customer", customerText);
     doc.put("agent_id", row.employeeId());
     doc.put("customer_grade", row.customerGrade());
     doc.put("date", row.createdAt().format(ES_DATE));
@@ -161,11 +171,22 @@ public class SearchDocBuilder {
 
   public IndexQuery buildKeywordDoc(
       Long consultId,
-      String mergedText,
+      List<Map<String, Object>> messages,
       com.uplus.batch.domain.summary.entity.ConsultationSummary summary
   ) {
+    String agentText = messages.stream()
+        .filter(m -> "상담사".equals(m.get("speaker")))
+        .map(m -> (String) m.get("text"))
+        .collect(java.util.stream.Collectors.joining(" "));
+
+    String customerText = messages.stream()
+        .filter(m -> "고객".equals(m.get("speaker")))
+        .map(m -> (String) m.get("text"))
+        .collect(java.util.stream.Collectors.joining(" "));
+
     Map<String, Object> doc = new HashMap<>();
-    doc.put("content", mergedText);
+    doc.put("agent", agentText);
+    doc.put("customer", customerText);
     doc.put("agent_id", summary.getAgent() == null ? null : summary.getAgent().getId());
     doc.put("customer_grade", summary.getCustomer() == null ? null : summary.getCustomer().getGrade());
     doc.put("date", summary.getConsultedAt() == null ? null : summary.getConsultedAt().format(ES_DATE));

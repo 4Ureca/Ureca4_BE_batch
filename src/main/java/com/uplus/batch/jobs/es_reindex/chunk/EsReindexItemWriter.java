@@ -39,6 +39,7 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
 
   @Override
   public void write(Chunk<? extends ConsultationSummary> chunk) {
+
     List<Long> consultIds = chunk.getItems().stream()
         .map(ConsultationSummary::getConsultId)
         .toList();
@@ -83,7 +84,7 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
         List<String> productCodes = extractProductCodes(summary.getResultProducts());
 
         searchDocs.add(searchDocBuilder.buildSearchDoc(summary, productCodes, keywordResult));
-        keywordDocs.add(searchDocBuilder.buildKeywordDoc(consultId, mergedText, summary));
+        keywordDocs.add(searchDocBuilder.buildKeywordDoc(consultId, messages, summary));
 
         successIds.add(consultId);
 

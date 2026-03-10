@@ -120,7 +120,6 @@ public class SummarySyncItemWriter implements ItemWriter<SummaryEventStatusRow> 
     ConsultationResultSyncRow row = results.get(consultId);
     if (row == null) throw new IllegalStateException("consultation_results not found");
 
-    // raw text → mergedText
     RawTextRow rawText = rawTexts.get(consultId);
     List<Map<String, Object>> messages = objectMapper.readValue(rawText.rawTextJson(), List.class);
     String mergedText = messages.stream()
@@ -155,7 +154,7 @@ public class SummarySyncItemWriter implements ItemWriter<SummaryEventStatusRow> 
     String allText = searchDocBuilder.buildAllText(row, retentionRow, productNames, keywordResult);
     searchDocs.add(searchDocBuilder.buildSearchDoc(
         consultId, row, retentionRow, riskFlags.get(consultId), productCodes, allText));
-    keywordDocs.add(searchDocBuilder.buildKeywordDoc(consultId, row, mergedText));
+    keywordDocs.add(searchDocBuilder.buildKeywordDoc(consultId, row, messages));
   }
 
   // -----------------------------------------------------------------------
