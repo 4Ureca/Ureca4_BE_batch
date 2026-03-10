@@ -2,7 +2,6 @@ package com.uplus.batch.domain.summary.service;
 
 import com.uplus.batch.common.dummy.dto.CacheDummy;
 import com.uplus.batch.domain.extraction.entity.ConsultationExtraction;
-import com.uplus.batch.domain.extraction.entity.EventStatus;
 import com.uplus.batch.domain.extraction.repository.ConsultationExtractionRepository;
 import com.uplus.batch.domain.summary.entity.SummaryEventStatus;
 import com.uplus.batch.domain.summary.repository.SummaryEventStatusRepository;
@@ -102,7 +101,8 @@ public class ConsultationSummaryGenerator {
     @Scheduled(cron = "${app.summary-sync.cron}")
     public void processSummaryQueue() {
         List<SummaryEventStatus> pending =
-                summaryEventStatusRepo.findTop100ByStatusOrderByCreatedAtAsc(EventStatus.REQUESTED);
+                summaryEventStatusRepo.findTop100ByStatusOrderByCreatedAtAsc(
+                        com.uplus.batch.domain.summary.enums.SummaryEventStatus.REQUESTED.getValue());
 
         if (pending.isEmpty()) {
             log.debug("[SummaryGenerator] 처리할 REQUESTED 건 없음");

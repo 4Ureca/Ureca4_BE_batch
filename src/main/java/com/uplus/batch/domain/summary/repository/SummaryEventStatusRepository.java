@@ -1,7 +1,6 @@
 package com.uplus.batch.domain.summary.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.uplus.batch.domain.extraction.entity.EventStatus;
 import com.uplus.batch.domain.summary.dto.*;
 import com.uplus.batch.domain.summary.entity.SummaryEventStatus;
 import java.sql.Timestamp;
@@ -29,7 +28,7 @@ public class SummaryEventStatusRepository {
     return SummaryEventStatus.reconstruct(
         rs.getLong("id"),
         rs.getLong("consult_id"),
-        EventStatus.valueOf(rs.getString("status")),
+        rs.getString("status"),
         rs.getInt("retry_count"),
         rs.getString("fail_reason"),
         ca != null ? ca.toLocalDateTime() : null,
@@ -40,22 +39,22 @@ public class SummaryEventStatusRepository {
   // ── ConsultationSummaryGenerator / RetryScheduler 용 엔티티 기반 CRUD ──────────
 
   /** REQUESTED 상태 중 오래된 순으로 최대 100건 조회 */
-  public List<SummaryEventStatus> findTop100ByStatusOrderByCreatedAtAsc(EventStatus status) {
+  public List<SummaryEventStatus> findTop100ByStatusOrderByCreatedAtAsc(String status) {
     return jdbcTemplate.query(
         "SELECT id, consult_id, status, retry_count, fail_reason, created_at, updated_at " +
         "FROM summary_event_status WHERE status = ? ORDER BY created_at ASC LIMIT 100",
         entityRowMapper,
-        status.name()
+        status
     );
   }
 
   /** FAILED 상태이고 retryCount < retryLimit 인 건 조회 (RetryScheduler 재배치용) */
-  public List<SummaryEventStatus> findByStatusAndRetryCountLessThan(EventStatus status, int retryLimit) {
+  public List<SummaryEventStatus> findByStatusAndRetryCountLessThan(String status, int retryLimit) {
     return jdbcTemplate.query(
         "SELECT id, consult_id, status, retry_count, fail_reason, created_at, updated_at " +
         "FROM summary_event_status WHERE status = ? AND retry_count < ?",
         entityRowMapper,
-        status.name(), retryLimit
+        status, retryLimit
     );
   }
 
@@ -63,7 +62,7 @@ public class SummaryEventStatusRepository {
   public void save(SummaryEventStatus entity) {
     jdbcTemplate.update(
         "UPDATE summary_event_status SET status = ?, retry_count = ?, fail_reason = ?, updated_at = NOW() WHERE id = ?",
-        entity.getStatus().name(),
+        entity.getStatus(),
         entity.getRetryCount(),
         entity.getFailReason(),
         entity.getSummaryEventId()
@@ -91,7 +90,7 @@ public class SummaryEventStatusRepository {
           toInsert.size(),
           (ps, e) -> {
             ps.setLong(1, e.getConsultId());
-            ps.setString(2, e.getStatus().name());
+            ps.setString(2, e.getStatus());
             ps.setInt(3, e.getRetryCount());
             ps.setString(4, e.getFailReason());
           }
@@ -104,7 +103,7 @@ public class SummaryEventStatusRepository {
           toUpdate,
           toUpdate.size(),
           (ps, e) -> {
-            ps.setString(1, e.getStatus().name());
+            ps.setString(1, e.getStatus());
             ps.setInt(2, e.getRetryCount());
             ps.setString(3, e.getFailReason());
             ps.setLong(4, e.getSummaryEventId());
@@ -416,7 +415,7 @@ public class SummaryEventStatusRepository {
 
     String sql = """
         UPDATE summary_event_status
-        SET status = 'COMPLETED',
+        SET status = 'completed',
             updated_at = NOW()
         WHERE id IN (%s)
         """.formatted(ids.stream().map(i->"?").collect(Collectors.joining(",")));
@@ -431,7 +430,7 @@ public class SummaryEventStatusRepository {
     String sql = """
         UPDATE summary_event_status
         SET retry_count = retry_count + 1,
-            status = 'REQUESTED',
+            status = 'requested',
             updated_at = NOW()
         WHERE id IN (%s)
         """.formatted(ids.stream().map(i->"?").collect(Collectors.joining(",")));
@@ -446,7 +445,7 @@ public class SummaryEventStatusRepository {
     String sql = """
         UPDATE summary_event_status
         SET retry_count = retry_count + 1,
-            status = 'FAILED',
+            status = 'failed',
             updated_at = NOW()
         WHERE id IN (%s)
         """.formatted(ids.stream().map(i->"?").collect(Collectors.joining(",")));
