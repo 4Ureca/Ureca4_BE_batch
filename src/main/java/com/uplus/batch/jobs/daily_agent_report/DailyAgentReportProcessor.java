@@ -7,9 +7,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.item.ItemProcessor;
@@ -17,6 +14,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.ConditionalOperators;
 import org.springframework.data.mongodb.core.aggregation.GroupOperation;
 import org.springframework.data.mongodb.core.aggregation.MatchOperation;
 import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
@@ -54,7 +52,17 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         .endAt(targetDate)
         .consultCount(metrics.getCount())
         .avgDurationMinutes(metrics.getAvgDuration() / 60.0) // 초 단위를 분 단위로 변환
-        .customerSatisfaction(metrics.getAvgSatisfaction() != null ? metrics.getAvgSatisfaction() : 0.0) // 고객 만족도 평균
+        .iamKeywordMatchAnalysis(metrics.getAvgIamMatchRate())
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(metrics.getAvgSatisfaction() != null ? metrics.getAvgSatisfaction() : 0.0)
+                // 응답률 계산: (응답건수 / 전체건수) * 100
+                .responseRate(metrics.getCount() > 0
+                    ? (double) metrics.getCompletedSurveyCount() / metrics.getCount() * 100.0 : 0)
+                .surveyTotalCount((int) metrics.getCount())          // 주간/월간 집계용 1
+                .surveyResponseCount((int) metrics.getCompletedSurveyCount()) // 주간/월간 집계용 2
+                .build()
+        )
         .categoryRanking(rankings)
         .build();
   }
@@ -74,10 +82,10 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
     GroupOperation group = Aggregation.group("category.code") // 중분류 코드로 그룹핑
         .first("category.large").as("large")            // 대분류 명칭
         .first("category.medium").as("medium")             // 중분류 명칭
-        .count().as("count");                           // 해당 중분류의 인입 건수
+        .count().as("count");                           // 해당 중분류의 건수
 
     ProjectionOperation project = Aggregation.project("large", "medium", "count")
-        .and("_id").as("code"); // 중분류 코드를 code 필드로 사용
+        .and("_id").as("code"); // 대분류 코드를 code 필드로 사용
 
     SortOperation sort = Aggregation.sort(Sort.Direction.DESC, "count");
 
@@ -107,14 +115,24 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
             .count().as("count")
             .avg("durationSec").as("avgDuration")
             .avg("customer.satisfiedScore").as("avgSatisfaction")
+            .avg("iam.matchRates").as("avgIamMatchRate") // 원본 DB 필드 -> DTO 필드
+            .sum(ConditionalOperators.when(Criteria.where("customer.satisfiedScore").gt(0))
+                .then(1).otherwise(0)).as("completedSurveyCount")
     );
 
     AggregationResults<DailyMetrics> results = mongoTemplate.aggregate(
         aggregation, "consultation_summary", DailyMetrics.class
     );
 
-    return results.getUniqueMappedResult() != null ?
-        results.getUniqueMappedResult() : new DailyMetrics(0, 0.0, 0.0);
+    DailyMetrics metrics = results.getUniqueMappedResult();
+
+    if (metrics == null) {
+      return new DailyMetrics(0L, 0.0, 0.0, 0L, 0.0, 0.0);
+    }
+
+    metrics.calculateResponseRate();
+
+    return metrics;
   }
 
 

@@ -1,7 +1,7 @@
 package com.uplus.batch.domain.summary.entity;
 
 import lombok.*;
-import org.springframework.data.annotation.Id;
+    import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.IndexDirection;
 import org.springframework.data.mongodb.core.index.Indexed;
@@ -40,6 +40,10 @@ public class ConsultationSummary {
   private Cancellation cancellation;
   private List<ResultProducts> resultProducts;
   private LocalDateTime createdAt;
+
+  @Indexed(name = "idx_searchIndexed")
+  private Boolean searchIndexed;
+  private LocalDateTime searchIndexedAt;
 
   // ================= Embedded =================
 

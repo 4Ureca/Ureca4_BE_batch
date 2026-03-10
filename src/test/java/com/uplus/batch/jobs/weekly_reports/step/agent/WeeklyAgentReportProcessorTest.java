@@ -42,6 +42,11 @@ class WeeklyAgentReportProcessorTest {
     DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
         .agentId(agentId)
         .consultCount(8)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(4.0)
+                .build()
+        )
         .categoryRanking(List.of(
             new CategoryRanking("CODE_A", "대", "중A", 5, 1),
             new CategoryRanking("CODE_B", "대", "중B", 3, 2)
@@ -51,6 +56,11 @@ class WeeklyAgentReportProcessorTest {
     DailyAgentReportSnapshot day2 = DailyAgentReportSnapshot.builder()
         .agentId(agentId)
         .consultCount(10)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(4.0)
+                .build()
+        )
         .categoryRanking(List.of(
             new CategoryRanking("CODE_B", "대", "중B", 10, 1)
         )).build();
@@ -104,14 +114,22 @@ class WeeklyAgentReportProcessorTest {
     DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
         .consultCount(10)
         .avgDurationMinutes(5.0)
-        .customerSatisfaction(4.0)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(4.0)
+                .build()
+        )
         .categoryRanking(new ArrayList<>()) // 이 부분이 누락되어 NPE 발생
         .build();
 
     DailyAgentReportSnapshot day2 = DailyAgentReportSnapshot.builder()
         .consultCount(20)
         .avgDurationMinutes(8.0)
-        .customerSatisfaction(5.0)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(5.0)
+                .build()
+        )
         .categoryRanking(new ArrayList<>())
         .build();
 
@@ -124,7 +142,7 @@ class WeeklyAgentReportProcessorTest {
     // then
     assertEquals(7.0, result.getAvgDurationMinutes());
     // (4*10 + 5*20) / 30 = 4.666...
-    assertEquals(4.66, result.getCustomerSatisfaction(), 0.01);
+    assertEquals(4.66, result.getCustomerSatisfactionAnalysis().getSatisfactionScore(), 0.01);
   }
 
   @Test
@@ -145,7 +163,11 @@ class WeeklyAgentReportProcessorTest {
     // given
     DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
         .consultCount(10).avgDurationMinutes(5.0)
-        .customerSatisfaction(0.0) // 만족도 응답 없음
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(0.0)
+                .build()
+        ) // 만족도 응답 없음
         .categoryRanking(new ArrayList<>()).build();
 
     when(mongoTemplate.find(any(Query.class), eq(DailyAgentReportSnapshot.class)))
@@ -155,7 +177,7 @@ class WeeklyAgentReportProcessorTest {
     WeeklyAgentReportSnapshot result = processor.process(101L);
 
     // then
-    assertEquals(0.0, result.getCustomerSatisfaction()); // 0으로 안전하게 떨어지는지 확인
+    assertEquals(0.00, result.getCustomerSatisfactionAnalysis().getSatisfactionScore()); // 0으로 안전하게 떨어지는지 확인
   }
 
 }

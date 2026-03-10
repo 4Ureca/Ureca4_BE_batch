@@ -44,6 +44,11 @@ class MonthlyAgentReportProcessorTest {
     DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
         .agentId(agentId)
         .consultCount(10)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(4.5)
+                .build()
+        )
         .categoryRanking(List.of(
             new CategoryRanking("FEE_01", "요금", "조회", 10, 1)
         )).build();
@@ -52,6 +57,11 @@ class MonthlyAgentReportProcessorTest {
     DailyAgentReportSnapshot day2 = DailyAgentReportSnapshot.builder()
         .agentId(agentId)
         .consultCount(25)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(0.0) // 혹은 적절한 테스트 값
+                .build()
+        )
         .categoryRanking(List.of(
             new CategoryRanking("DEVICE_01", "기기", "변경", 20, 1),
             new CategoryRanking("FEE_01", "요금", "조회", 5, 2)
@@ -108,7 +118,11 @@ class MonthlyAgentReportProcessorTest {
     DailyAgentReportSnapshot day1 = DailyAgentReportSnapshot.builder()
         .consultCount(10)
         .avgDurationMinutes(6.0)
-        .customerSatisfaction(4.0)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(4.0)
+                .build()
+        )
         .categoryRanking(new ArrayList<>())
         .build();
 
@@ -116,7 +130,11 @@ class MonthlyAgentReportProcessorTest {
     DailyAgentReportSnapshot day2 = DailyAgentReportSnapshot.builder()
         .consultCount(20)
         .avgDurationMinutes(9.0)
-        .customerSatisfaction(1.0)
+        .customerSatisfactionAnalysis(
+            DailyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
+                .satisfactionScore(1.0)
+                .build()
+        )
         .categoryRanking(new ArrayList<>())
         .build();
 
@@ -131,7 +149,7 @@ class MonthlyAgentReportProcessorTest {
     assertEquals(8.0, result.getAvgDurationMinutes());
 
     // 만족도 가중치: (4.0*10 + 1.0*20) / 30 = 2.0점
-    assertEquals(2.0, result.getCustomerSatisfaction(), 0.01);
+    assertEquals(2.0, result.getCustomerSatisfactionAnalysis().getSatisfactionScore(), 0.01);
 
     // 전체 건수 합산: 10 + 20 = 30건
     assertEquals(30, result.getConsultCount());

@@ -44,15 +44,7 @@ public class DailyAgentReportJobConfig {
         .build();
   }
 
-//  @Bean
-//  @StepScope // 실행 시점에 생성되도록 설정
-//  public ItemReader<String> agentIdReader() {
-//    List<String> agentIds = mongoTemplate.getCollection("consultation_summary")
-//        .distinct("agent._id", Integer.class)
-//        .into(new ArrayList<>())
-//        .stream().map(String::valueOf).collect(Collectors.toList());
-//    return new ListItemReader<>(agentIds);
-//  }
+
 @Bean
 @StepScope
 public ItemReader<Long> agentIdReader() { // 1. 반환 타입을 Long으로 변경
