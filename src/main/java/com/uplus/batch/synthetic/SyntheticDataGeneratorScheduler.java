@@ -4,7 +4,6 @@ import com.uplus.batch.domain.extraction.entity.EventStatus;
 import com.uplus.batch.domain.extraction.repository.EventStatusRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -35,7 +34,6 @@ public class SyntheticDataGeneratorScheduler {
     /** 동일 JVM 내 중복 실행 방지 플래그. 단일 인스턴스 배포 기준으로 충분. */
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    @Scheduled(fixedDelayString = "${synthetic-data.fixed-delay:300000}")
     public void generate() {
         if (!properties.isEnabled()) {
             log.debug("[SyntheticDataGenerator] 비활성화 (synthetic-data.enabled=false) — 스킵");
