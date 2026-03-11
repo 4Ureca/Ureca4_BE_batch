@@ -97,11 +97,10 @@ public class KeywordStatsTasklet implements Tasklet {
 
     /**
      * daily_report_snapshot에서 기간 내 문서 조회
-     * KeywordRankTasklet은 'date' 필드(LocalDate)를 사용하므로 date 기준으로 조회
+     * KeywordRankTasklet은 'startAt' 필드 기준으로 upsert하므로 startAt 기준으로 조회
      */
     private List<Document> queryDailySnapshots(LocalDate start, LocalDate end) {
-        // KeywordRankTasklet이 저장한 date 필드(LocalDate) 기준 조회
-        Query query = new Query(Criteria.where("date").gte(start).lte(end));
+        Query query = new Query(Criteria.where("startAt").gte(start).lte(end));
         return mongoTemplate.find(query, Document.class, "daily_report_snapshot");
     }
 
@@ -112,7 +111,9 @@ public class KeywordStatsTasklet implements Tasklet {
         Map<String, Long> totalCounts = new HashMap<>();
 
         for (Document snapshot : snapshots) {
-            List<Document> topKeywords = snapshot.getList("topKeywords", Document.class);
+            Document keywordSummary = (Document) snapshot.get("keywordSummary");
+            if (keywordSummary == null) continue;
+            List<Document> topKeywords = keywordSummary.getList("topKeywords", Document.class);
             if (topKeywords == null) continue;
 
             for (Document kw : topKeywords) {
@@ -173,7 +174,9 @@ public class KeywordStatsTasklet implements Tasklet {
         int totalDays = snapshots.size();
 
         for (Document snapshot : snapshots) {
-            List<Document> topKeywords = snapshot.getList("topKeywords", Document.class);
+            Document keywordSummary = (Document) snapshot.get("keywordSummary");
+            if (keywordSummary == null) continue;
+            List<Document> topKeywords = keywordSummary.getList("topKeywords", Document.class);
             if (topKeywords == null) continue;
 
             // 일별 TOP 10 추출
@@ -221,14 +224,16 @@ public class KeywordStatsTasklet implements Tasklet {
 
     /**
      * 고객 유형별(등급별) 키워드 합산
-     * daily_report_snapshot의 byGradeCode 필드를 읽어서 합산
+     * daily_report_snapshot의 keywordSummary.byCustomerType 필드를 읽어서 합산
      */
     private List<KeywordStatsResult.CustomerTypeKeyword> buildByCustomerType(List<Document> snapshots) {
         // gradeCode → keyword → count
         Map<String, Map<String, Long>> gradeKeywordCounts = new HashMap<>();
 
         for (Document snapshot : snapshots) {
-            List<Document> byGradeCode = snapshot.getList("byGradeCode", Document.class);
+            Document keywordSummary = (Document) snapshot.get("keywordSummary");
+            if (keywordSummary == null) continue;
+            List<Document> byGradeCode = keywordSummary.getList("byCustomerType", Document.class);
             if (byGradeCode == null) continue;
 
             for (Document grade : byGradeCode) {

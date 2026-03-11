@@ -81,12 +81,11 @@ public class KeywordRankTasklet implements Tasklet {
         Void.class
     );
 
-    // 2. 결과 파싱 (필드명과 일치하도록 수정)
+    // 2. 결과 파싱 (null 키워드, 한글자 키워드 제외)
     List<KeywordCount> topKeywords = response.aggregations().get("total_keywords").sterms()
         .buckets().array().stream()
         .map(b -> new KeywordCount(b.key().stringValue(), b.docCount()))
-        // "null" 이라는 문자열을 가진 키워드 제외, 한글자 제외
-//        .filter(k -> !"null".equals(k.getKeyword()) && k.getKeyword().length() > 1)
+        .filter(k -> !"null".equals(k.getKeyword()) && k.getKeyword().length() > 1)
         .toList();
 
     List<GradeSnapshot> gradeSnapshots = response.aggregations().get("by_grade").sterms().buckets()
@@ -95,20 +94,32 @@ public class KeywordRankTasklet implements Tasklet {
           List<KeywordCount> keywords = gradeBucket.aggregations().get("grade_keywords")
               .sterms().buckets().array().stream()
               .map(k -> new KeywordCount(k.key().stringValue(), k.docCount()))
-              // "null" 이라는 문자열을 가진 키워드 제외, 한글자 제외
-//              .filter(k -> !"null".equals(k.getKeyword()) && k.getKeyword().length() > 1)
+              .filter(k -> !"null".equals(k.getKeyword()) && k.getKeyword().length() > 1)
               .toList();
           return new GradeSnapshot(gradeBucket.key().stringValue(), keywords);
         })
         .toList();
 
+    // Document로 변환하여 _class 메타데이터 저장 방지
+    List<Document> topKeywordDocs = topKeywords.stream()
+        .map(k -> new Document("keyword", k.getKeyword()).append("count", k.getCount()))
+        .toList();
+
+    List<Document> gradeDocs = gradeSnapshots.stream()
+        .map(g -> {
+          List<Document> kwDocs = g.getKeywords().stream()
+              .map(k -> new Document("keyword", k.getKeyword()).append("count", k.getCount()))
+              .toList();
+          return new Document("gradeCode", g.getGradeCode()).append("keywords", kwDocs);
+        })
+        .toList();
 
     Query upsertQuery = new Query();
     upsertQuery.addCriteria(Criteria.where("startAt").is(targetDate));
 
     Update update = new Update()
-        .set("keywordSummary.topKeywords", topKeywords)
-        .set("keywordSummary.byCustomerType", gradeSnapshots);
+        .set("keywordSummary.topKeywords", topKeywordDocs)
+        .set("keywordSummary.byCustomerType", gradeDocs);
 
     mongoTemplate.upsert(upsertQuery, update, DailyReportSnapshot.class);
 
