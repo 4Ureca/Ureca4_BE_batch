@@ -1,21 +1,15 @@
 package com.uplus.batch.jobs.daily_agent_report;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.uplus.batch.common.elasticsearch.ElasticsearchAnalyzeService;
-import com.uplus.batch.domain.extraction.entity.ConsultationRawText;
-import com.uplus.batch.domain.extraction.repository.ConsultationRawTextRepository;
+import com.uplus.batch.common.elasticsearch.QualityAnalysisAggregator;
+import com.uplus.batch.common.elasticsearch.QualityAnalysisAggregator.QualityAggResult;
 import com.uplus.batch.jobs.daily_agent_report.entity.CategoryRanking;
 import com.uplus.batch.jobs.daily_agent_report.entity.DailyAgentReportSnapshot;
 import com.uplus.batch.jobs.daily_agent_report.entity.DailyAgentReportSnapshot.QualityAnalysis;
 import com.uplus.batch.jobs.daily_agent_report.entity.DailyMetrics;
-import java.io.IOException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
@@ -38,7 +32,7 @@ import org.springframework.stereotype.Component;
  * 상담사 일별 리포트 Processor
  *
  * consultation_summary(MongoDB)에서 카테고리 집계,
- * consultation_raw_texts(MySQL)에서 원문 대화를 가져와 응대 품질 분석 수행.
+ * consult-keyword-index(ES)에서 응대 품질 분석 수행.
  */
 @Slf4j
 @Component
@@ -47,9 +41,7 @@ import org.springframework.stereotype.Component;
 public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgentReportSnapshot> {
 
   private final MongoTemplate mongoTemplate;
-  private final ConsultationRawTextRepository rawTextRepository;
-  private final ObjectMapper objectMapper;
-  private final ElasticsearchAnalyzeService esAnalyzeService;
+  private final QualityAnalysisAggregator qualityAnalysisAggregator;
 
   // === ES analysis_synonyms.txt 동의어 매핑 결과 토큰 ===
   private static final String TOKEN_EMPATHY = "공감응대";
@@ -86,7 +78,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
     // 2. 전체 성과 지표 집계 (평균 소요 시간, 만족도 포함)
     DailyMetrics metrics = aggregateDailyMetrics(agentId, targetDate);
 
-    // 3. 응대 품질 분석
+    // 3. 응대 품질 분석 (ES consult-keyword-index aggregation)
     QualityAnalysis qualityAnalysis = analyzeQuality(agentId, targetDate);
 
     // 4. 상담사 이름 조회
@@ -116,146 +108,61 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         .build();
   }
 
-  // ==================== 응대 품질 분석 ====================
+  // ==================== 응대 품질 분석 (ES Aggregation) ====================
 
   /**
-   * 상담사의 해당일 상담 원문을 분석하여 품질 메트릭을 계산한다.
-   *
-   * 1) MongoDB consultation_summary → consultId 목록 조회
-   * 2) MySQL consultation_raw_texts → 원문 텍스트 일괄 조회
-   * 3) ES _analyze API (korean_analysis_index_analyzer) → 동의어 사전 적용 토큰 반환
-   * 4) 품질 카테고리별 토큰 카운트 → 비율/횟수 산출
+   * consult-keyword-index에서 agent.quality 필드의 품질 토큰을 집계하여 품질 메트릭을 계산한다.
+   * ES terms + filters aggregation으로 N건을 한 번의 쿼리로 처리.
    */
   private QualityAnalysis analyzeQuality(Long agentId, LocalDate date) {
-    // 1. 해당 상담사의 consultId 목록 조회 (MongoDB)
-    List<Long> consultIds = getConsultIds(agentId, date);
-    if (consultIds.isEmpty()) {
-      return null;
-    }
-
-    // 2. 원문 텍스트 일괄 조회 (MySQL)
-    List<ConsultationRawText> rawTexts = rawTextRepository.findAllByConsultIdIn(consultIds);
-    if (rawTexts.isEmpty()) {
-      return null;
-    }
-
-    // 3. 각 상담별 ES 분석
-    long empathyTotal = 0;
-    int apologyCount = 0;
-    int closingCount = 0;
-    int courtesyCount = 0;
-    int promptnessCount = 0;
-    int accuracyCount = 0;
-    int waitingGuideCount = 0;
-    int analyzedCount = 0;
-
-    for (ConsultationRawText rawText : rawTexts) {
-      String agentText = extractAgentText(rawText.getRawTextJson());
-      if (agentText.isEmpty()) {
-        continue;
-      }
-
-      // ES _analyze API 호출 → 동의어 사전 적용된 토큰 리스트 반환
-      List<String> tokens;
-      try {
-        tokens = esAnalyzeService.analyzeForQuality(agentText);
-      } catch (IOException e) {
-        log.warn("[Quality] ES 분석 실패 (consultId={}): {}", rawText.getConsultId(), e.getMessage());
-        continue;
-      }
-
-      analyzedCount++;
-
-      // 토큰에서 품질 카테고리별 카운트
-      long empathy = tokens.stream().filter(TOKEN_EMPATHY::equals).count();
-      empathyTotal += empathy;
-      if (tokens.contains(TOKEN_APOLOGY)) apologyCount++;
-      if (tokens.contains(TOKEN_CLOSING) || tokens.contains(TOKEN_THANKS)) closingCount++;
-      if (tokens.contains(TOKEN_COURTESY)) courtesyCount++;
-      if (tokens.contains(TOKEN_PROMPTNESS)) promptnessCount++;
-      if (tokens.contains(TOKEN_ACCURACY)) accuracyCount++;
-      if (tokens.contains(TOKEN_WAITING)) waitingGuideCount++;
-    }
-
-    if (analyzedCount == 0) {
-      return null;
-    }
-
-    // 4. 비율 계산
-    double apologyRate = round1((double) apologyCount / analyzedCount * 100);
-    double closingRate = round1((double) closingCount / analyzedCount * 100);
-    double courtesyRate = round1((double) courtesyCount / analyzedCount * 100);
-    double promptnessRate = round1((double) promptnessCount / analyzedCount * 100);
-    double accuracyRate = round1((double) accuracyCount / analyzedCount * 100);
-    double waitingGuideRate = round1((double) waitingGuideCount / analyzedCount * 100);
-    double avgEmpathy = round1((double) empathyTotal / analyzedCount);
-
-    // 5. totalScore 계산 (5점 만점)
-    double empathyScore = Math.min(avgEmpathy / 3.0, 1.0); // 건당 3회 이상이면 만점
-    double totalScore = round1(
-        (empathyScore * W_EMPATHY
-            + apologyRate / 100.0 * W_APOLOGY
-            + closingRate / 100.0 * W_CLOSING
-            + courtesyRate / 100.0 * W_COURTESY
-            + promptnessRate / 100.0 * W_PROMPTNESS
-            + accuracyRate / 100.0 * W_ACCURACY
-            + waitingGuideRate / 100.0 * W_WAITING) * 5.0);
-
-    log.info("[Quality] agent={} — 분석 {}건, 공감 {}회, 사과 {}%, 마무리 {}%, 총점 {}",
-        agentId, analyzedCount, empathyTotal, apologyRate, closingRate, totalScore);
-
-    return QualityAnalysis.builder()
-        .analyzedCount(analyzedCount)
-        .empathyCount(empathyTotal)
-        .avgEmpathyPerConsult(avgEmpathy)
-        .apologyRate(apologyRate)
-        .closingRate(closingRate)
-        .courtesyRate(courtesyRate)
-        .promptnessRate(promptnessRate)
-        .accuracyRate(accuracyRate)
-        .waitingGuideRate(waitingGuideRate)
-        .totalScore(totalScore)
-        .build();
-  }
-
-  /**
-   * MongoDB consultation_summary에서 해당 상담사의 consultId 목록 조회
-   */
-  private List<Long> getConsultIds(Long agentId, LocalDate date) {
-    LocalDateTime startDt = date.atStartOfDay();
-    LocalDateTime endDt = date.atTime(LocalTime.MAX);
-
-    Query query = new Query(
-        Criteria.where("agent._id").is(agentId)
-            .and("consultedAt").gte(startDt).lte(endDt)
-    );
-    query.fields().include("consultId");
-
-    return mongoTemplate.find(query, Document.class, "consultation_summary")
-        .stream()
-        .map(doc -> {
-          Object val = doc.get("consultId");
-          return val instanceof Number ? ((Number) val).longValue() : null;
-        })
-        .filter(id -> id != null)
-        .collect(Collectors.toList());
-  }
-
-  /**
-   * rawTextJson에서 상담사 발화만 추출하여 하나의 문자열로 합친다.
-   */
-  private String extractAgentText(String rawTextJson) {
     try {
-      List<Map<String, String>> turns = objectMapper.readValue(
-          rawTextJson, new TypeReference<>() {});
+      QualityAggResult result = qualityAnalysisAggregator.aggregate(agentId, date);
 
-      return turns.stream()
-          .filter(turn -> "상담사".equals(turn.get("speaker")))
-          .map(turn -> turn.getOrDefault("text", ""))
-          .collect(Collectors.joining(" "));
+      if (result == null) {
+        return null;
+      }
+
+      long total = result.totalDocs();
+
+      // 비율 계산 (%)
+      double apologyRate = round1((double) result.apologyDocCount() / total * 100);
+      double closingRate = round1((double) result.closingDocCount() / total * 100);
+      double courtesyRate = round1((double) result.courtesyDocCount() / total * 100);
+      double promptnessRate = round1((double) result.promptnessDocCount() / total * 100);
+      double accuracyRate = round1((double) result.accuracyDocCount() / total * 100);
+      double waitingGuideRate = round1((double) result.waitingDocCount() / total * 100);
+      double avgEmpathy = round1((double) result.empathyDocCount() / total);
+
+      // totalScore 계산 (5점 만점)
+      double empathyScore = Math.min(avgEmpathy / 3.0, 1.0); // 건당 3회 이상이면 만점
+      double totalScore = round1(
+          (empathyScore * W_EMPATHY
+              + apologyRate / 100.0 * W_APOLOGY
+              + closingRate / 100.0 * W_CLOSING
+              + courtesyRate / 100.0 * W_COURTESY
+              + promptnessRate / 100.0 * W_PROMPTNESS
+              + accuracyRate / 100.0 * W_ACCURACY
+              + waitingGuideRate / 100.0 * W_WAITING) * 5.0);
+
+      log.info("[Quality] agent={} — 분석 {}건, 공감 {}회, 사과 {}%, 마무리 {}%, 총점 {}",
+          agentId, total, result.empathyDocCount(), apologyRate, closingRate, totalScore);
+
+      return QualityAnalysis.builder()
+          .analyzedCount((int) total)
+          .empathyCount(result.empathyDocCount())
+          .avgEmpathyPerConsult(avgEmpathy)
+          .apologyRate(apologyRate)
+          .closingRate(closingRate)
+          .courtesyRate(courtesyRate)
+          .promptnessRate(promptnessRate)
+          .accuracyRate(accuracyRate)
+          .waitingGuideRate(waitingGuideRate)
+          .totalScore(totalScore)
+          .build();
+
     } catch (Exception e) {
-      log.warn("[Quality] rawTextJson 파싱 실패: {}", e.getMessage());
-      return "";
+      log.error("[Quality] ES 집계 실패 (agentId={}): {}", agentId, e.getMessage());
+      return null;
     }
   }
 
