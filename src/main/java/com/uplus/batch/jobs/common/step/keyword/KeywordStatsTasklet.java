@@ -227,24 +227,24 @@ public class KeywordStatsTasklet implements Tasklet {
      * daily_report_snapshot의 keywordSummary.byCustomerType 필드를 읽어서 합산
      */
     private List<KeywordStatsResult.CustomerTypeKeyword> buildByCustomerType(List<Document> snapshots) {
-        // gradeCode → keyword → count
-        Map<String, Map<String, Long>> gradeKeywordCounts = new HashMap<>();
+        // customerType → keyword → count
+        Map<String, Map<String, Long>> customerTypeKeywordCounts = new HashMap<>();
 
         for (Document snapshot : snapshots) {
             Document keywordSummary = (Document) snapshot.get("keywordSummary");
             if (keywordSummary == null) continue;
-            List<Document> byGradeCode = keywordSummary.getList("byCustomerType", Document.class);
-            if (byGradeCode == null) continue;
+            List<Document> byCustomerType = keywordSummary.getList("byCustomerType", Document.class);
+            if (byCustomerType == null) continue;
 
-            for (Document grade : byGradeCode) {
-                String gradeCode = grade.getString("gradeCode");
-                if (gradeCode == null) continue;
+            for (Document ct : byCustomerType) {
+                String customerType = ct.getString("customerType");
+                if (customerType == null) continue;
 
-                List<Document> keywords = grade.getList("keywords", Document.class);
+                List<Document> keywords = ct.getList("keywords", Document.class);
                 if (keywords == null) continue;
 
-                Map<String, Long> keywordMap = gradeKeywordCounts
-                        .computeIfAbsent(gradeCode, k -> new HashMap<>());
+                Map<String, Long> keywordMap = customerTypeKeywordCounts
+                        .computeIfAbsent(customerType, k -> new HashMap<>());
 
                 for (Document kw : keywords) {
                     String keyword = kw.getString("keyword");
@@ -256,8 +256,8 @@ public class KeywordStatsTasklet implements Tasklet {
             }
         }
 
-        // 등급별 TOP 5 키워드+건수 추출
-        return gradeKeywordCounts.entrySet().stream()
+        // 유형별 TOP 5 키워드+건수 추출
+        return customerTypeKeywordCounts.entrySet().stream()
                 .map(entry -> {
                     List<KeywordStatsResult.CustomerKeywordCount> topKeywords = entry.getValue().entrySet().stream()
                             .sorted(Map.Entry.<String, Long>comparingByValue().reversed())

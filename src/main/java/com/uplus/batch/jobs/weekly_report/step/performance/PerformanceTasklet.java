@@ -19,10 +19,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -44,6 +41,16 @@ public class PerformanceTasklet implements Tasklet {
     private final String targetCollection;
 
     private static final String SOURCE_COLLECTION = "consultation_summary";
+
+    /** 대분류 코드 매핑 */
+    private static final Map<String, String> LARGE_CATEGORY_CODE = Map.of(
+            "요금/납부", "FEE",
+            "기기변경", "DEV",
+            "장애/A/S", "TRB",
+            "해지/재약정", "CHN",
+            "부가서비스", "ADD",
+            "기타", "ETC"
+    );
 
     public PerformanceTasklet(
             MongoTemplate mongoTemplate,
@@ -156,7 +163,11 @@ public class PerformanceTasklet implements Tasklet {
         log.info("[Performance] 상담사 {}명 집계 완료, 평균 응대품질 {}",
                 agentPerformance.size(), Math.round(avgQualityScore * 10.0) / 10.0);
 
-        // 3) 결과 빌드
+        // 3) 카테고리별 빈도 집계
+        List<Document> categoryRanking = aggregateCategory(startAt, endAt);
+        log.info("[Performance] 카테고리 {}종 집계", categoryRanking.size());
+
+        // 4) 결과 빌드
         PerformanceResult result = PerformanceResult.builder()
                 .totalConsultCount(totalCount)
                 .avgConsultCountPerAgent(avgConsultCountPerAgent)
@@ -165,35 +176,70 @@ public class PerformanceTasklet implements Tasklet {
                 .agentPerformance(agentPerformance)
                 .build();
 
-        // 4) 스냅샷 upsert
-        upsertSnapshot(startAt, endAt, result);
+        // 5) 스냅샷 upsert
+        upsertSnapshot(startAt, endAt, result, categoryRanking);
 
         log.info("[Performance] {} ~ {} → {} upsert 완료", startDate, endDate, targetCollection);
         return RepeatStatus.FINISHED;
     }
 
-    private void upsertSnapshot(LocalDateTime startAt, LocalDateTime endAt, PerformanceResult result) {
-        List<Document> agentDocs = result.getAgentPerformance().stream()
-                .map(a -> new Document("agentId", a.getAgentId())
-                        .append("agentName", a.getAgentName())
-                        .append("consultCount", a.getConsultCount())
-                        .append("avgDurationMinutes", a.getAvgDurationMinutes())
-                        .append("avgSatisfiedScore", a.getAvgSatisfiedScore())
-                        .append("qualityScore", a.getQualityScore()))
-                .collect(Collectors.toList());
+    private void upsertSnapshot(LocalDateTime startAt, LocalDateTime endAt,
+                                PerformanceResult result, List<Document> categoryRanking) {
+        int rank = 1;
+        List<Document> agentDocs = new ArrayList<>();
+        for (var a : result.getAgentPerformance()) {
+            agentDocs.add(new Document("agentId", a.getAgentId())
+                    .append("agentName", a.getAgentName())
+                    .append("consultCount", a.getConsultCount())
+                    .append("avgDurationMinutes", a.getAvgDurationMinutes())
+                    .append("qualityScore", a.getQualityScore())
+                    .append("avgSatisfiedScore", a.getAvgSatisfiedScore())
+                    .append("rank", rank++));
+        }
+
+        Document performanceSummary = new Document()
+                .append("avgConsultPerAgent", result.getAvgConsultCountPerAgent())
+                .append("avgSatisfiedScore", result.getAvgSatisfiedScore())
+                .append("categoryRanking", categoryRanking)
+                .append("agentRanking", agentDocs);
 
         Query query = new Query(Criteria.where("startAt").is(startAt));
         Update update = new Update()
                 .set("startAt", startAt)
                 .set("endAt", endAt)
                 .set("totalConsultCount", result.getTotalConsultCount())
-                .set("avgConsultCountPerAgent", result.getAvgConsultCountPerAgent())
                 .set("avgDurationMinutes", result.getAvgDurationMinutes())
-                .set("avgSatisfiedScore", result.getAvgSatisfiedScore())
-                .set("agentPerformance", agentDocs)
+                .set("performanceSummary", performanceSummary)
                 .setOnInsert("createdAt", LocalDateTime.now());
 
         mongoTemplate.upsert(query, update, targetCollection);
+    }
+
+    /**
+     * 카테고리별 상담 빈도 집계
+     */
+    private List<Document> aggregateCategory(LocalDateTime startAt, LocalDateTime endAt) {
+        Aggregation agg = Aggregation.newAggregation(
+                Aggregation.match(Criteria.where("consultedAt").gte(startAt).lte(endAt)),
+                Aggregation.group("category.large").count().as("count"),
+                Aggregation.sort(Sort.Direction.DESC, "count")
+        );
+
+        List<Document> results = mongoTemplate.aggregate(agg, SOURCE_COLLECTION, Document.class)
+                .getMappedResults();
+
+        List<Document> categoryRanking = new ArrayList<>();
+        int rank = 1;
+        for (Document doc : results) {
+            String name = doc.getString("_id");
+            if (name == null) continue;
+            String code = LARGE_CATEGORY_CODE.getOrDefault(name, "ETC");
+            categoryRanking.add(new Document("code", code)
+                    .append("name", name)
+                    .append("count", doc.getInteger("count", 0))
+                    .append("rank", rank++));
+        }
+        return categoryRanking;
     }
 
     private double getDoubleOrZero(Document doc, String field) {

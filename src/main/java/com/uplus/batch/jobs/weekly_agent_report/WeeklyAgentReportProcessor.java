@@ -123,6 +123,7 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
     // 6. 주별 결과 생성
     return WeeklyAgentReportSnapshot.builder()
         .agentId(agentId)
+        .agentName(dailySnapshots.get(0).getAgentName())
         .startAt(startAt)
         .endAt(endAt)
         .consultCount(totalConsultCount)
@@ -132,6 +133,8 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
             WeeklyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
                 .satisfactionScore(weeklyAvgSatisfaction)
                 .responseRate(weeklyAvgResponseRate)
+                .surveyTotalCount(totalSurveyTotalCount)
+                .surveyResponseCount(totalSurveyResponseCount)
                 .build()
         )
         .categoryRanking(sortedRankings)
@@ -194,6 +197,7 @@ public class WeeklyAgentReportProcessor implements ItemProcessor<Long, WeeklyAge
             + waitingGuideRate / 100.0 * W_WAITING) * 5.0);
 
     WeeklyAgentReportSnapshot.QualityAnalysis result = new WeeklyAgentReportSnapshot.QualityAnalysis();
+    result.setAnalyzedCount(qualityConsultCount);
     result.setEmpathyCount(totalEmpathy);
     result.setAvgEmpathyPerConsult(avgEmpathy);
     result.setApologyRate(apologyRate);

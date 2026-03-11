@@ -1,21 +1,11 @@
 package com.uplus.batch.jobs.daily_report.step.keyword_rank;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
-import co.elastic.clients.json.JsonData;
-import com.mongodb.client.result.UpdateResult;
-import com.uplus.batch.common.elasticsearch.ElasticsearchAnalyzeService;
 import com.uplus.batch.jobs.daily_report.dto.DailyReportSnapshot;
 import com.uplus.batch.jobs.daily_report.dto.GradeSnapshot;
-import com.uplus.batch.jobs.daily_report.step.keyword_rank.Consultation;
-import com.uplus.batch.jobs.daily_report.step.keyword_rank.ConsultationReaderConfig;
-import com.uplus.batch.jobs.daily_report.step.keyword_rank.KeywordAggregator;
 import com.uplus.batch.jobs.daily_report.step.keyword_rank.KeywordCount;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
-import java.time.ZoneId;
-import java.util.Date;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
@@ -30,7 +20,6 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -48,10 +37,11 @@ public class KeywordRankTasklet implements Tasklet {
   public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext)
       throws Exception {
 
-     // [실제 운영용]
-//    LocalDate targetDate = LocalDate.now().minusDays(1);
-    //[테스트용]
-    LocalDate targetDate = LocalDate.of(2025, 1, 18);
+    var jobParams = chunkContext.getStepContext().getJobParameters();
+    String targetDateStr = (String) jobParams.get("targetDate");
+    LocalDate targetDate = targetDateStr != null
+            ? LocalDate.parse(targetDateStr)
+            : LocalDate.now().minusDays(1);
 
     String startOfDay = targetDate.atStartOfDay().toString();
     String endOfDay = targetDate.atTime(LocalTime.MAX).toString();
@@ -110,7 +100,7 @@ public class KeywordRankTasklet implements Tasklet {
           List<Document> kwDocs = g.getKeywords().stream()
               .map(k -> new Document("keyword", k.getKeyword()).append("count", k.getCount()))
               .toList();
-          return new Document("gradeCode", g.getGradeCode()).append("keywords", kwDocs);
+          return new Document("customerType", g.getGradeCode()).append("keywords", kwDocs);
         })
         .toList();
 

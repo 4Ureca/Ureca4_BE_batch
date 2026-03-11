@@ -76,7 +76,8 @@ public class CustomerRiskTasklet implements Tasklet {
                 .append("excessiveCompensation", result.getExcessiveCompensation())
                 .append("repeatedComplaint", result.getRepeatedComplaint())
                 .append("phishingVictim", result.getPhishingVictim())
-                .append("churnRisk", result.getChurnRisk());
+                .append("churnRisk", result.getChurnRisk())
+                .append("totalRiskCount", result.getTotalRiskCount());
 
         Query upsertQuery = new Query(Criteria.where("startAt").is(start));
         Update update = new Update()

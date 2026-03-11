@@ -31,6 +31,7 @@ public class WeeklyAgentReportSnapshot {
 
   @Indexed
   private Long agentId;      // 상담사 식별자
+  private String agentName;  // 상담사 이름
 
   private LocalDate startAt;   // 집계 시작 시각
   private LocalDate endAt;     // 집계 종료 시각
@@ -62,6 +63,7 @@ public class WeeklyAgentReportSnapshot {
     private double promptnessRate;        // 신속 응대 표현 포함 비율 (%)
     private double accuracyRate;          // 정확 응대 표현 포함 비율 (%)
     private double waitingGuideRate;      // 대기 안내 포함 비율 (%)
+    private long analyzedCount;           // 분석 대상 상담 건수
     private double totalScore;            // 종합 점수 (0~5)
   }
 
@@ -71,5 +73,7 @@ public class WeeklyAgentReportSnapshot {
   public static class CustomerSatisfactionAnalysis {
     private double satisfactionScore; // 질문 항목에 대한 답변들 평균
     private double responseRate; // 응답률
+    private long surveyTotalCount;    // 설문 요청 수
+    private long surveyResponseCount; // 설문 응답 수
   }
 }

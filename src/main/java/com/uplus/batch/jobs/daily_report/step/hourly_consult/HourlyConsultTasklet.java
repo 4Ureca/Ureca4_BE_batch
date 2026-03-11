@@ -301,7 +301,7 @@ public class HourlyConsultTasklet implements Tasklet {
             StringBuilder sb = new StringBuilder();
             for (JsonNode node : array) {
                 if (!"고객".equals(node.path("speaker").asText(""))) continue;
-                String msg = node.path("message").asText("");
+                String msg = node.path("text").asText("");
                 if (msg.length() >= 2) sb.append(msg).append(" ");
             }
             return sb.length() > 0 ? sb.toString() : null;
@@ -385,60 +385,6 @@ public class HourlyConsultTasklet implements Tasklet {
         return result;
     }
 
-
-    /**
-     * [변경] 고객 유형별 키워드 집계
-     * 기존: MongoDB aggregation (summary.keywords 기반 — 해지방어만)
-     * 변경: MySQL 원문 → Nori analyze → grade_code별 집계 (전체 커버)
-     */
-    private List<HourlyConsultResult.CustomerTypeKeyword> aggregateKeywordsByCustomerTypeFromRawText(
-            LocalDateTime start, LocalDateTime end) {
-
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT rt.raw_text_json, cu.grade_code
-                FROM consultation_results cr
-                JOIN consultation_raw_texts rt ON cr.consult_id = rt.consult_id
-                JOIN customers cu ON cr.customer_id = cu.customer_id
-                WHERE cr.created_at >= ? AND cr.created_at < ?
-                ORDER BY cr.consult_id
-                """, start, end);
-
-        // grade_code별 키워드 빈도 집계 (유진님의 KeywordAggregator 방식)
-        Map<String, Map<String, Long>> byGrade = new LinkedHashMap<>();
-
-        for (Map<String, Object> row : rows) {
-            String rawJson = (String) row.get("raw_text_json");
-            String gradeCode = (String) row.get("grade_code");
-            String content = extractCustomerText(rawJson);
-            if (content == null || content.length() < 2 || gradeCode == null) continue;
-
-            try {
-                List<String> tokens = analyzeService.analyze(content);
-                Map<String, Long> gradeMap = byGrade.computeIfAbsent(gradeCode, k -> new HashMap<>());
-                for (String token : tokens) {
-                    gradeMap.merge(token, 1L, Long::sum);
-                }
-            } catch (Exception e) {
-                log.warn("[HourlyConsult] gradeCode={} 키워드 분석 실패: {}", gradeCode, e.getMessage());
-            }
-        }
-
-        // grade별 상위 6개 키워드만 추출 (기존 limit과 동일)
-        return byGrade.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> {
-                    List<String> keywords = entry.getValue().entrySet().stream()
-                            .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                            .limit(6)
-                            .map(Map.Entry::getKey)
-                            .collect(Collectors.toList());
-                    return HourlyConsultResult.CustomerTypeKeyword.builder()
-                            .customerType(entry.getKey())
-                            .keywords(keywords)
-                            .build();
-                })
-                .collect(Collectors.toList());
-    }
 
     // ═══════════════════════════════════════════════════════
     //  기존 슬롯 합산 (변경 없음)
@@ -548,8 +494,6 @@ public class HourlyConsultTasklet implements Tasklet {
         Query upsertQuery = new Query(Criteria.where("startAt").is(dayStart));
         Update update = new Update()
                 .set("startAt", dayStart).set("endAt", dayEnd)
-                .set("totalConsultCount", result.getTotalConsultCount())
-                .set("avgDurationMinutes", result.getAvgDurationMinutes())
                 .set("timeSlotTrend", trendDocs)
                 .setOnInsert("createdAt", LocalDateTime.now());
 

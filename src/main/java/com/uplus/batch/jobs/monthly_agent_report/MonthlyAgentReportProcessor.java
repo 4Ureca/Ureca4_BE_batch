@@ -121,6 +121,7 @@ public class MonthlyAgentReportProcessor implements
     // 6. 월별 결과 생성
     return MonthlyAgentReportSnapshot.builder()
         .agentId(agentId)
+        .agentName(dailySnapshots.get(0).getAgentName())
         .startAt(startAt)
         .endAt(endAt)
         .consultCount(totalConsultCount)
@@ -130,6 +131,8 @@ public class MonthlyAgentReportProcessor implements
             MonthlyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
                 .satisfactionScore(monthlyAvgSatisfaction)
                 .responseRate(monthlyAvgResponseRate)
+                .surveyTotalCount(totalSurveyTotalCount)
+                .surveyResponseCount(totalSurveyResponseCount)
                 .build()
         )
         .categoryRanking(sortedRankings)
@@ -192,6 +195,7 @@ public class MonthlyAgentReportProcessor implements
             + waitingGuideRate / 100.0 * W_WAITING) * 5.0);
 
     MonthlyAgentReportSnapshot.QualityAnalysis result = new MonthlyAgentReportSnapshot.QualityAnalysis();
+    result.setAnalyzedCount(qualityConsultCount);
     result.setEmpathyCount(totalEmpathy);
     result.setAvgEmpathyPerConsult(avgEmpathy);
     result.setApologyRate(apologyRate);

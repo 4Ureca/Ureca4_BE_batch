@@ -65,24 +65,27 @@ class KeywordStatsTaskletTest {
         keywordCounts.forEach((keyword, count) ->
                 topKeywords.add(new Document("keyword", keyword).append("count", count)));
 
-        return new Document("date", date).append("topKeywords", topKeywords);
+        Document keywordSummary = new Document("topKeywords", topKeywords);
+        return new Document("date", date).append("keywordSummary", keywordSummary);
     }
 
-    /** topKeywords + byGradeCode 포함 Document 생성 */
+    /** topKeywords + byCustomerType 포함 Document 생성 */
     private Document createSnapshotWithGrade(LocalDate date,
                                               Map<String, Integer> keywordCounts,
                                               Map<String, Map<String, Integer>> gradeKeywords) {
         Document snapshot = createSnapshot(date, keywordCounts);
 
-        List<Document> byGradeCode = new ArrayList<>();
-        gradeKeywords.forEach((gradeCode, keywords) -> {
+        List<Document> byCustomerType = new ArrayList<>();
+        gradeKeywords.forEach((customerType, keywords) -> {
             List<Document> kwDocs = new ArrayList<>();
             keywords.forEach((kw, cnt) ->
                     kwDocs.add(new Document("keyword", kw).append("count", cnt)));
-            byGradeCode.add(new Document("gradeCode", gradeCode).append("keywords", kwDocs));
+            byCustomerType.add(new Document("customerType", customerType).append("keywords", kwDocs));
         });
 
-        snapshot.append("byGradeCode", byGradeCode);
+        // keywordSummary 안에 byCustomerType 추가
+        Document keywordSummary = snapshot.get("keywordSummary", Document.class);
+        keywordSummary.append("byCustomerType", byCustomerType);
         return snapshot;
     }
 
@@ -438,7 +441,7 @@ class KeywordStatsTaskletTest {
             assertThat(byCustomerType).hasSize(1);
             Document vip = byCustomerType.get(0);
             assertThat(vip.getString("customerType")).isEqualTo("VIP");
-            List<String> keywords = vip.getList("keywords", String.class);
+            List<Document> keywords = vip.getList("keywords", Document.class);
             assertThat(keywords).hasSize(5);
         }
 
