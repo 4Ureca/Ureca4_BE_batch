@@ -32,79 +32,56 @@ import java.util.Map;
 @Slf4j
 public class KeywordRankTasklet implements Tasklet {
 
-  private final ConsultationReaderConfig readerConfig;
-  private final ElasticsearchAnalyzeService analyzeService;
   private final MongoTemplate mongoTemplate;
 
   private final ElasticsearchClient elasticsearchClient; // 직접 주입
+
 
   @Override
   public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext)
       throws Exception {
 
-    // 어제 날짜만 조회
-    LocalDate targetDate = LocalDate.now().minusDays(1);
+     // [실제 운영용]
+//    LocalDate targetDate = LocalDate.now().minusDays(1);
+    //[테스트용]
+    LocalDate targetDate = LocalDate.of(2025, 1, 15);
+
     String startOfDay = targetDate.atStartOfDay().toString();
     String endOfDay = targetDate.atTime(LocalTime.MAX).toString();
 
-    // 1. 쿼리 객체 생성 (가장 안전한 'of' 문법)
-    Query rangeQuery = Query.of(q -> q
-        .range(r -> r
-            .date(d -> d
-                .field("created_at")
-                .gte(startOfDay)
-                .lte(endOfDay)
-            )
-        )
-    );
-
-    // 2. ES 집계 실행
+    // 1. 쿼리 객체 생성 (고객 발화 키워드 집계용)
     SearchResponse<Void> response = elasticsearchClient.search(s -> s
-            .index("consult-index")
+            .index("consult-keyword-index")
             .size(0)
-            .query(rangeQuery) // 생성한 쿼리 주입
+            .query(q -> q
+                .range(r -> r
+                    .date(d -> d
+                        .field("date")
+                        .gte(startOfDay)
+                        .lte(endOfDay)
+                    )
+                )
+            )
             .aggregations("total_keywords", a -> a
-                .terms(t -> t.field("content").size(20)) // "content.field"
+                .terms(t -> t.field("customer.search").size(20))
             )
             .aggregations("by_grade", a -> a
-                .terms(t -> t.field("grade_code"))
+                .terms(t -> t.field("customer_grade"))
                 .aggregations("grade_keywords", subA -> subA
-                    .terms(t -> t.field("content").size(6)) // "content.field"
+                    .terms(t -> t.field("customer.search").size(6))
                 )
             ),
         Void.class
     );
 
-    // 2. 결과 파싱 및 Snapshot 생성
-    List<KeywordCount> topKeywords = parseTotalKeywords(response);
-    List<GradeSnapshot> gradeSnapshots = parseGradeSnapshots(response);
-
-    DailyReportSnapshot snapshot = DailyReportSnapshot.builder()
-        .date(targetDate)
-        .topKeywords(topKeywords)
-        .byGradeCode(gradeSnapshots)
-        .build();
-
-    // 3. 로그 출력 (logAndSave 메서드 대신 직접 구현)
-    log.info("===== 전체 키워드 TOP10 =====");
-    snapshot.getTopKeywords().stream().limit(10)
-        .forEach(k -> log.info("keyword={}, count={}", k.getKeyword(), k.getCount()));
-
-    // 4. MongoDB 저장
-    mongoTemplate.save(snapshot);
-
-    return RepeatStatus.FINISHED;
-  }
-
-  // 결과 파싱용 헬퍼 메서드들
-  private List<KeywordCount> parseTotalKeywords(SearchResponse<Void> response) {
-    return response.aggregations().get("total_keywords").sterms().buckets().array().stream()
+    // 2. 결과 파싱 (필드명과 일치하도록 수정)
+    List<KeywordCount> topKeywords = response.aggregations().get("total_keywords").sterms()
+        .buckets().array().stream()
         .map(b -> new KeywordCount(b.key().stringValue(), b.docCount()))
         .toList();
-  }
 
-  private List<GradeSnapshot> parseGradeSnapshots(SearchResponse<Void> response) {
-    return response.aggregations().get("by_grade").sterms().buckets().array().stream()
+    List<GradeSnapshot> gradeSnapshots = response.aggregations().get("by_grade").sterms().buckets()
+        .array().stream()
         .map(gradeBucket -> {
           List<KeywordCount> keywords = gradeBucket.aggregations().get("grade_keywords")
               .sterms().buckets().array().stream()
@@ -113,89 +90,16 @@ public class KeywordRankTasklet implements Tasklet {
           return new GradeSnapshot(gradeBucket.key().stringValue(), keywords);
         })
         .toList();
+
+    // 3. Snapshot 생성 및 저장
+    DailyReportSnapshot snapshot = DailyReportSnapshot.builder()
+        .date(targetDate)
+        .topKeywords(topKeywords)
+        .byGradeCode(gradeSnapshots)
+        .build();
+
+    mongoTemplate.save(snapshot);
+
+    return RepeatStatus.FINISHED;
   }
 }
-
-
-//    var reader = readerConfig.dailyConsultationReader();
-//    reader.open(chunkContext.getStepContext().getStepExecution().getExecutionContext());
-//
-//    KeywordAggregator aggregator = new KeywordAggregator();
-//
-//    try {
-//      Consultation item;
-//
-//      while ((item = reader.read()) != null) {
-//        String content = item.getContent();
-//        if (content == null || content.length() < 2) {
-//          continue;
-//        }
-//
-//        // 에러 발생해도 finally 블록에서 reader 닫힘.
-//        List<String> keywords = analyzeService.analyze(content);
-//        aggregator.accumulate(keywords, item.getGradeCode());
-//      }
-//
-//    } finally {
-//      reader.close();
-//    }
-//
-//    List<KeywordCount> topKeywords =
-//        aggregator.getTotalKeywordCount().entrySet().stream()
-//            .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-////            .limit(10)
-//            .map(e -> new KeywordCount(e.getKey(), e.getValue()))
-//            .toList();
-//
-//    List<GradeSnapshot> gradeSnapshots =
-//        aggregator.getByGradeCode().entrySet().stream()
-//            .map(entry -> {
-//
-//              List<KeywordCount> list =
-//                  entry.getValue().entrySet().stream()
-//                      .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-//                      .map(e -> new KeywordCount(e.getKey(), e.getValue()))
-//                      .toList();
-//
-//              return new GradeSnapshot(entry.getKey(), list);
-//            })
-//            .toList();
-//
-//    DailyReportSnapshot snapshot =
-//        DailyReportSnapshot.builder()
-//            .date(LocalDate.now().minusDays(1))
-//            .topKeywords(topKeywords)
-//            .byGradeCode(gradeSnapshots)
-//            .build();
-//
-//
-//    // ===== 전체 키워드 TOP10 로그 =====
-//    log.info("===== 전체 키워드 TOP10 =====");
-//
-//    snapshot.getTopKeywords()
-//        .stream()
-//        .limit(10)
-//        .forEach(k ->
-//            log.info("keyword={}, count={}", k.getKeyword(), k.getCount())
-//        );
-//
-//
-//// ===== 고객 등급별 TOP5 로그 =====
-//    snapshot.getByGradeCode()
-//        .forEach(grade -> {
-//
-//          log.info("===== 고객등급 {} TOP5 키워드 =====", grade.getGradeCode());
-//
-//          grade.getKeywords()
-//              .stream()
-//              .limit(5)
-//              .forEach(k ->
-//                  log.info("keyword={}, count={}", k.getKeyword(), k.getCount())
-//              );
-//        });
-//
-//    mongoTemplate.save(snapshot);
-//
-//    return RepeatStatus.FINISHED;
-//  }
-//}
