@@ -117,10 +117,8 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
             String gender = (customer != null) ? customer.getString("gender") : null;
 
             String customerType;
-            if (ageGroup != null && gender != null) {
-                customerType = ageGroup + " " + gender;
-            } else if (ageGroup != null) {
-                customerType = ageGroup;
+            if (ageGroup != null) {
+                customerType = ageGroup + " " + (gender != null ? gender : "미상");
             } else {
                 customerType = "기타";
             }

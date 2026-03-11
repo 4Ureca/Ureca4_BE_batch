@@ -256,18 +256,21 @@ public class KeywordStatsTasklet implements Tasklet {
             }
         }
 
-        // 등급별 TOP 5 키워드명 추출
+        // 등급별 TOP 5 키워드+건수 추출
         return gradeKeywordCounts.entrySet().stream()
                 .map(entry -> {
-                    List<String> topKeywordNames = entry.getValue().entrySet().stream()
+                    List<KeywordStatsResult.CustomerKeywordCount> topKeywords = entry.getValue().entrySet().stream()
                             .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                             .limit(GRADE_KEYWORD_SIZE)
-                            .map(Map.Entry::getKey)
+                            .map(e -> KeywordStatsResult.CustomerKeywordCount.builder()
+                                    .keyword(e.getKey())
+                                    .count(e.getValue())
+                                    .build())
                             .toList();
 
                     return KeywordStatsResult.CustomerTypeKeyword.builder()
                             .customerType(entry.getKey())
-                            .keywords(topKeywordNames)
+                            .keywords(topKeywords)
                             .build();
                 })
                 .toList();
@@ -289,7 +292,10 @@ public class KeywordStatsTasklet implements Tasklet {
 
         log.info("===== 고객 유형별 키워드 =====");
         byCustomerType.forEach(ct ->
-                log.info("  {} → {}", ct.getCustomerType(), ct.getKeywords()));
+                log.info("  {} → {}", ct.getCustomerType(),
+                        ct.getKeywords().stream()
+                                .map(k -> k.getKeyword() + "(" + k.getCount() + ")")
+                                .toList()));
     }
 
     /**
@@ -324,9 +330,15 @@ public class KeywordStatsTasklet implements Tasklet {
 
         // byCustomerType를 Document 리스트로 변환
         List<Document> customerTypeDocs = byCustomerType.stream()
-                .map(ct -> new Document()
-                        .append("customerType", ct.getCustomerType())
-                        .append("keywords", ct.getKeywords()))
+                .map(ct -> {
+                    List<Document> kwDocs = ct.getKeywords().stream()
+                            .map(kw -> new Document("keyword", kw.getKeyword())
+                                    .append("count", kw.getCount()))
+                            .toList();
+                    return new Document()
+                            .append("customerType", ct.getCustomerType())
+                            .append("keywords", kwDocs);
+                })
                 .toList();
 
         Document keywordSummary = new Document()
