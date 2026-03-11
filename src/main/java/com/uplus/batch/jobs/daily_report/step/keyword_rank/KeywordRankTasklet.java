@@ -78,6 +78,8 @@ public class KeywordRankTasklet implements Tasklet {
     List<KeywordCount> topKeywords = response.aggregations().get("total_keywords").sterms()
         .buckets().array().stream()
         .map(b -> new KeywordCount(b.key().stringValue(), b.docCount()))
+        // "null" 이라는 문자열을 가진 키워드 제외, 한글자 제외
+        .filter(k -> !"null".equals(k.getKeyword()) && k.getKeyword().length() > 1)
         .toList();
 
     List<GradeSnapshot> gradeSnapshots = response.aggregations().get("by_grade").sterms().buckets()
@@ -86,6 +88,8 @@ public class KeywordRankTasklet implements Tasklet {
           List<KeywordCount> keywords = gradeBucket.aggregations().get("grade_keywords")
               .sterms().buckets().array().stream()
               .map(k -> new KeywordCount(k.key().stringValue(), k.docCount()))
+              // "null" 이라는 문자열을 가진 키워드 제외, 한글자 제외
+              .filter(k -> !"null".equals(k.getKeyword()) && k.getKeyword().length() > 1)
               .toList();
           return new GradeSnapshot(gradeBucket.key().stringValue(), keywords);
         })
