@@ -12,6 +12,7 @@ import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -34,8 +35,8 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
     Map<String, String> productMasterMap = loadProductMaster();
 
     // 1. 집계 기간 설정 (데이터가 있는 2025년 1월로 테스트)
-    LocalDateTime startAt = LocalDateTime.of(2025, 1, 1, 0, 0, 0);
-    LocalDateTime endAt = LocalDateTime.of(2025, 1, 31, 23, 59, 59);
+    LocalDateTime startAt = LocalDateTime.of(2025, 1, 13, 0, 0, 0);
+    LocalDateTime endAt = LocalDateTime.of(2025, 1, 19, 23, 59, 59);
 
     /** [운영용] 배치가 실행되는 시점 기준 "지난주 월요일 ~ 일요일" 계산 **/
 //    LocalDate now = LocalDate.now();
@@ -130,7 +131,15 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
         analysis.getCanceledSubscriptions().size());
 
     // 실제 저장
-    mongoTemplate.save(snapshot, "weekly_report_snapshot");
+    Query upsertQuery = new Query(Criteria.where("startAt").is(startAt));
+
+    Update update = new Update()
+        .set("startAt", startAt)
+        .set("endAt", endAt)
+        .set("subscriptionAnalysis", analysis)
+        .setOnInsert("createdAt", LocalDateTime.now());
+
+    mongoTemplate.upsert(upsertQuery, update, "weekly_report_snapshot");
     log.info("[WeeklyStats] MongoDB 저장 완료 (ID: {})", snapshot.getId());
 
     return RepeatStatus.FINISHED;

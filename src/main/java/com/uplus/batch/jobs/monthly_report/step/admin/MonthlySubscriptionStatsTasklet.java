@@ -11,6 +11,7 @@ import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -127,8 +128,20 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
         analysis.getNewSubscriptions().size(),
         analysis.getCanceledSubscriptions().size());
 
-    // 실제 저장을 위해 주석 해제 상태로 둡니다.
-    mongoTemplate.save(snapshot, "monthly_report_snapshot");
+    // MongoDB upsert
+    Query upsertQuery = new Query(
+        Criteria.where("startAt").is(startAt)
+            .and("endAt").is(endAt)
+    );
+
+    Update update = new Update()
+        .set("subscriptionAnalysis", analysis)
+        .setOnInsert("startAt", startAt)
+        .setOnInsert("endAt", endAt)
+        .setOnInsert("createdAt", LocalDateTime.now());
+
+    mongoTemplate.upsert(upsertQuery, update, "monthly_report_snapshot");
+
     log.info("[MonthlyStats] MongoDB 저장 완료 (ID: {})", snapshot.getId());
 
     return RepeatStatus.FINISHED;
