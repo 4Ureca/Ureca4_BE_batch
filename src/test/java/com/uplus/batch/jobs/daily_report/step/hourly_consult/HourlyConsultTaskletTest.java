@@ -134,10 +134,10 @@ class HourlyConsultTaskletTest {
 
         List<Map<String, Object>> fakeRows = List.of(
                 Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"요금이 너무 많이 나온 것 같아서요\"},{\"speaker\":\"상담사\",\"message\":\"확인해드리겠습니다\"}]",
+                        "[{\"speaker\":\"고객\",\"text\":\"요금이 너무 많이 나온 것 같아서요\"},{\"speaker\":\"상담사\",\"text\":\"확인해드리겠습니다\"}]",
                         "grade_code", "VIP"),
                 Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"기기변경 가능한지 문의드립니다\"},{\"speaker\":\"상담사\",\"message\":\"네 도와드리겠습니다\"}]",
+                        "[{\"speaker\":\"고객\",\"text\":\"기기변경 가능한지 문의드립니다\"},{\"speaker\":\"상담사\",\"text\":\"네 도와드리겠습니다\"}]",
                         "grade_code", "DIAMOND")
         );
 
@@ -168,7 +168,7 @@ class HourlyConsultTaskletTest {
 
         List<Map<String, Object>> fakeRows = List.of(
                 Map.of("raw_text_json",
-                        "[{\"speaker\":\"상담사\",\"message\":\"안녕하세요 LG유플러스입니다\"}]",
+                        "[{\"speaker\":\"상담사\",\"text\":\"안녕하세요 LG유플러스입니다\"}]",
                         "grade_code", "VIP")
         );
 
@@ -191,7 +191,7 @@ class HourlyConsultTaskletTest {
         List<Map<String, Object>> fakeRows = List.of(
                 Map.of("raw_text_json", "INVALID_JSON", "grade_code", "VIP"),
                 Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"해지하고 싶어요\"}]",
+                        "[{\"speaker\":\"고객\",\"text\":\"해지하고 싶어요\"}]",
                         "grade_code", "VVIP")
         );
 
@@ -215,7 +215,7 @@ class HourlyConsultTaskletTest {
 
         List<Map<String, Object>> fakeRows = List.of(
                 Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"요금 납부 문의입니다\"}]",
+                        "[{\"speaker\":\"고객\",\"text\":\"요금 납부 문의입니다\"}]",
                         "grade_code", "VIP")
         );
 
