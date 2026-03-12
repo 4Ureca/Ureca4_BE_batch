@@ -47,7 +47,7 @@ public class ConsultationSummaryDummyGenerator {
             .phone(row.getCustomerPhone())
             .grade(row.getGradeCode())
             .ageGroup(calculateAgeGroup(row.getBirthDate()))
-            .gender(random.nextBoolean() ? "남성" : "여성")
+            .gender(mapGender(row.getGender()))
             .satisfiedScore(randomSatisfiedScore())
             .build()
     );
@@ -154,6 +154,13 @@ public class ConsultationSummaryDummyGenerator {
     int group = (age / 10) * 10;
 
     return group + "대";
+  }
+
+  /** customers.gender('M'/'F'/null) → '남성'/'여성'. null이면 랜덤 폴백. */
+  private String mapGender(String raw) {
+    if ("M".equalsIgnoreCase(raw)) return "남성";
+    if ("F".equalsIgnoreCase(raw)) return "여성";
+    return random.nextBoolean() ? "남성" : "여성";
   }
 
   private Double randomSatisfiedScore() {

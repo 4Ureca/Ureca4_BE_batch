@@ -23,6 +23,7 @@ public class ConsultationResultRow {
   private final String customerPhone;
   private final String gradeCode;
   private final LocalDate birthDate;
+  private final String gender;       // 'M' | 'F' | null
 
   private final String categoryCode;
   private final String categoryLarge;
