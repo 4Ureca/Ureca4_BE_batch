@@ -1,0 +1,52 @@
+{
+  "settings": {
+    "analysis": {
+      "tokenizer": {
+        "consult_tokenizer": {
+          "type": "nori_tokenizer",
+          "decompound_mode": "mixed",
+          "user_dictionary": "analysis/userdict.txt"
+        }
+      },
+      "filter": {
+
+        "consult_pos_filter": {
+          "type": "nori_part_of_speech",
+          "stoptags": [
+            "E","IC","J","MAG","MAJ","MM",
+            "SP","SSC","SSO","SC","SE",
+            "VV","VA","VX","VCP","VCN",
+            "EP","EF","EC","ETN","ETM",
+            "XPN","XSA","XSN","XSV",
+            "UNA","NA","VSV"
+          ]
+        },
+
+        "consult_stop_filter": {
+          "type": "stop",
+          "stopwords_path": "analysis/stopwords.txt",
+          "ignore_case": true
+        },
+
+        "consult_synonym_filter": {
+          "type": "synonym_graph",
+          "synonyms_path": "analysis/synonyms.txt",
+          "lenient": true
+        }
+
+      },
+      "analyzer": {
+        "consult_analyzer": {
+          "type": "custom",
+          "tokenizer": "consult_tokenizer",
+          "filter": [
+            "lowercase",
+            "consult_pos_filter",
+            "consult_stop_filter",
+            "consult_synonym_filter"
+          ]
+        }
+      }
+    }
+  }
+}

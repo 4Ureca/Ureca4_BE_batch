@@ -10,7 +10,6 @@ spring:
     username: crm
     password: crm
 
-
   data:
     mongodb:
       uri: mongodb://localhost:27018/crm
@@ -29,10 +28,3 @@ app:
   summary-sync:
     cron: "0 * * * * *"
     batch-size: 100
-
-synthetic-data: #스케쥴러로 데이터 생성 <-- 여기서 컨트롤
-  enabled: true
-  batch-size: 20                 # 회차당 생성 건수
-  fixed-delay: 300000            # 스케줄러 실행 간격 (ms, 기본 5분) <-- 6000 = 1분
-  failure-alert-threshold: 5     # AI 요약 영구 실패(retryCount>=3) 알람 임계값
-

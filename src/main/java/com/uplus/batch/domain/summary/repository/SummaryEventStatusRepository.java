@@ -2,6 +2,7 @@ package com.uplus.batch.domain.summary.repository;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uplus.batch.domain.summary.dto.*;
+import com.uplus.batch.domain.summary.entity.ConsultationSummary;
 import com.uplus.batch.domain.summary.entity.SummaryEventStatus;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
@@ -167,7 +168,7 @@ public class SummaryEventStatusRepository {
             rs.getLong("consult_id"),
             rs.getInt("retry_count")
         ),
-        com.uplus.batch.domain.summary.enums.SummaryEventStatus.REQUESTED.getValue(),
+        com.uplus.batch.domain.summary.enums.SummaryEventStatusCode.REQUESTED.getValue(),
         lastEventId,
         Timestamp.valueOf(jobStartTime),
         batchSize
@@ -228,7 +229,7 @@ public class SummaryEventStatusRepository {
         .collect(Collectors.toMap(
             ConsultationResultSyncRow::consultId,
             r -> r,
-            (a,b)->a
+            (a, b) -> a
         ));
   }
 
@@ -272,28 +273,41 @@ public class SummaryEventStatusRepository {
         .collect(Collectors.groupingBy(ConsultProductLogSyncRow::consultId));
   }
 
-  public Map<Long, List<String>> findRiskFlags(List<Long> consultIds) {
+  public Map<Long, List<ConsultationSummary.RiskFlag>> findRiskFlags(List<Long> consultIds) {
 
     if (consultIds == null || consultIds.isEmpty()) return Map.of();
 
     String inSql = consultIds.stream().map(i -> "?").collect(Collectors.joining(","));
 
     String sql = """
-        SELECT consult_id, type_code
-        FROM customer_risk_logs
-        WHERE consult_id IN (%s)
+        SELECT
+            r.consult_id,
+            r.type_code,
+            r.level_code
+        FROM customer_risk_logs r
+        JOIN risk_level_policy p ON r.level_code = p.level_code
+        WHERE r.consult_id IN (%s)
+          AND r.deleted_at IS NULL
+        ORDER BY p.sort_order
         """.formatted(inSql);
 
     List<RiskFlagRow> rows =
-        jdbcTemplate.query(sql, (rs,rowNum)->new RiskFlagRow(
+        jdbcTemplate.query(sql, (rs, rowNum) -> new RiskFlagRow(
             rs.getLong("consult_id"),
-            rs.getString("type_code")
+            rs.getString("type_code"),
+            rs.getString("level_code")
         ), consultIds.toArray(new Object[0]));
 
     return rows.stream()
         .collect(Collectors.groupingBy(
             RiskFlagRow::consultId,
-            Collectors.mapping(RiskFlagRow::typeCode, Collectors.toList())
+            Collectors.mapping(
+                r -> ConsultationSummary.RiskFlag.builder()
+                    .riskType(r.riskType())
+                    .riskLevel(r.riskLevel())
+                    .build(),
+                Collectors.toList()
+            )
         ));
   }
 
@@ -316,16 +330,16 @@ public class SummaryEventStatusRepository {
         WHERE consult_id IN (%s)
         """.formatted(inSql);
 
-    List<RetentionAnalysisRow> rows = jdbcTemplate.query(sql, (rs,rowNum)->{
+    List<RetentionAnalysisRow> rows = jdbcTemplate.query(sql, (rs, rowNum) -> {
 
       List<String> actions = null;
 
       try {
         String json = rs.getString("defense_actions");
-        if(json!=null){
-          actions = objectMapper.readValue(json,List.class);
+        if (json != null) {
+          actions = objectMapper.readValue(json, List.class);
         }
-      } catch(Exception ignored){}
+      } catch (Exception ignored) {}
 
       return new RetentionAnalysisRow(
           rs.getLong("consult_id"),
@@ -342,8 +356,8 @@ public class SummaryEventStatusRepository {
     return rows.stream()
         .collect(Collectors.toMap(
             RetentionAnalysisRow::consultId,
-            r->r,
-            (a,b)->a
+            r -> r,
+            (a, b) -> a
         ));
   }
 
@@ -366,7 +380,7 @@ public class SummaryEventStatusRepository {
         """.formatted(inSql);
 
     List<CustomerReviewRow> rows =
-        jdbcTemplate.query(sql,(rs,rowNum)->new CustomerReviewRow(
+        jdbcTemplate.query(sql, (rs, rowNum) -> new CustomerReviewRow(
             rs.getLong("consult_id"),
             rs.getInt("score_1"),
             rs.getInt("score_2"),
@@ -378,8 +392,8 @@ public class SummaryEventStatusRepository {
     return rows.stream()
         .collect(Collectors.toMap(
             CustomerReviewRow::consultId,
-            r->r,
-            (a,b)->a
+            r -> r,
+            (a, b) -> a
         ));
   }
 
@@ -396,7 +410,7 @@ public class SummaryEventStatusRepository {
         """.formatted(inSql);
 
     List<RawTextRow> rows =
-        jdbcTemplate.query(sql,(rs,rowNum)->new RawTextRow(
+        jdbcTemplate.query(sql, (rs, rowNum) -> new RawTextRow(
             rs.getLong("consult_id"),
             rs.getString("raw_text_json")
         ), consultIds.toArray(new Object[0]));
@@ -404,28 +418,28 @@ public class SummaryEventStatusRepository {
     return rows.stream()
         .collect(Collectors.toMap(
             RawTextRow::consultId,
-            r->r,
-            (a,b)->a
+            r -> r,
+            (a, b) -> a
         ));
   }
 
   public void markCompletedBatch(List<Long> ids) {
 
-    if (ids==null || ids.isEmpty()) return;
+    if (ids == null || ids.isEmpty()) return;
 
     String sql = """
         UPDATE summary_event_status
         SET status = 'completed',
             updated_at = NOW()
         WHERE id IN (%s)
-        """.formatted(ids.stream().map(i->"?").collect(Collectors.joining(",")));
+        """.formatted(ids.stream().map(i -> "?").collect(Collectors.joining(",")));
 
     jdbcTemplate.update(sql, ids.toArray(new Object[0]));
   }
 
   public void markRetryBatch(List<Long> ids) {
 
-    if (ids==null || ids.isEmpty()) return;
+    if (ids == null || ids.isEmpty()) return;
 
     String sql = """
         UPDATE summary_event_status
@@ -433,14 +447,14 @@ public class SummaryEventStatusRepository {
             status = 'requested',
             updated_at = NOW()
         WHERE id IN (%s)
-        """.formatted(ids.stream().map(i->"?").collect(Collectors.joining(",")));
+        """.formatted(ids.stream().map(i -> "?").collect(Collectors.joining(",")));
 
     jdbcTemplate.update(sql, ids.toArray(new Object[0]));
   }
 
   public void markFailedBatch(List<Long> ids) {
 
-    if (ids==null || ids.isEmpty()) return;
+    if (ids == null || ids.isEmpty()) return;
 
     String sql = """
         UPDATE summary_event_status
@@ -448,7 +462,7 @@ public class SummaryEventStatusRepository {
             status = 'failed',
             updated_at = NOW()
         WHERE id IN (%s)
-        """.formatted(ids.stream().map(i->"?").collect(Collectors.joining(",")));
+        """.formatted(ids.stream().map(i -> "?").collect(Collectors.joining(",")));
 
     jdbcTemplate.update(sql, ids.toArray(new Object[0]));
   }

@@ -3,7 +3,10 @@ package com.uplus.batch.jobs.es_reindex;
 import com.uplus.batch.domain.summary.entity.ConsultationSummary;
 import com.uplus.batch.jobs.es_reindex.chunk.EsReindexItemReader;
 import com.uplus.batch.jobs.es_reindex.chunk.EsReindexItemWriter;
+import com.uplus.batch.domain.summary.service.SummaryProcessingLockService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
@@ -26,8 +29,15 @@ public class EsReindexJobConfig {
   private final JobRepository jobRepository;
   private final PlatformTransactionManager transactionManager;
   private final JobLauncher jobLauncher;
-  private final EsReindexItemReader reader;
   private final EsReindexItemWriter writer;
+  private final MongoTemplate mongoTemplate;
+  private final SummaryProcessingLockService lockService;
+
+  @Bean
+  @StepScope
+  public EsReindexItemReader esReindexItemReader() {
+    return new EsReindexItemReader(mongoTemplate, lockService);
+  }
 
   @Bean
   public Job esReindexJob() {
@@ -40,12 +50,11 @@ public class EsReindexJobConfig {
   public Step esReindexStep() {
     return new StepBuilder("esReindexStep", jobRepository)
         .<ConsultationSummary, ConsultationSummary>chunk(100, transactionManager)
-        .reader(reader)
+        .reader(esReindexItemReader())
         .writer(writer)
         .build();
   }
 
-  // 10분마다 실행
   @Scheduled(fixedDelay = 10 * 60 * 1000)
   public void schedule() {
     try {

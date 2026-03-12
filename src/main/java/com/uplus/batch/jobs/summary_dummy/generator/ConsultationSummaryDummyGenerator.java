@@ -17,6 +17,8 @@ import java.util.concurrent.ThreadLocalRandom;
 @RequiredArgsConstructor
 public class ConsultationSummaryDummyGenerator {
 
+  private static final List<String> RISK_LEVELS = List.of("LOW", "MEDIUM", "HIGH");
+
   private final ThreadLocalRandom random = ThreadLocalRandom.current();
   private final CacheDummy cache;
 
@@ -24,13 +26,11 @@ public class ConsultationSummaryDummyGenerator {
 
     ConsultationSummary doc = new ConsultationSummary();
 
-    // === 30번 상담결과서 기반 ===
     doc.setConsultId(row.getConsultId());
     doc.setConsultedAt(row.getCreatedAt());
     doc.setChannel(row.getChannel());
     doc.setDurationSec(row.getDurationSec());
 
-    // 상담사
     doc.setAgent(
         ConsultationSummary.Agent.builder()
             .id(row.getEmpId())
@@ -38,7 +38,6 @@ public class ConsultationSummaryDummyGenerator {
             .build()
     );
 
-    // 고객
     doc.setCustomer(
         ConsultationSummary.Customer.builder()
             .id(row.getCustomerId())
@@ -52,7 +51,6 @@ public class ConsultationSummaryDummyGenerator {
             .build()
     );
 
-    // 카테고리
     doc.setCategory(
         ConsultationSummary.Category.builder()
             .code(row.getCategoryCode())
@@ -62,7 +60,6 @@ public class ConsultationSummaryDummyGenerator {
             .build()
     );
 
-    // IAM (실제 데이터 기반), TODO: 키워드 일치율 미정
     doc.setIam(
         ConsultationSummary.Iam.builder()
             .issue(row.getIamIssue())
@@ -72,12 +69,10 @@ public class ConsultationSummaryDummyGenerator {
             .matchRates(random.nextDouble(0.3, 0.95))
             .build()
     );
-    doc.setRiskFlags(randomRiskFlags());
 
-    // TODO: AI관련 미정
+    doc.setRiskFlags(randomRiskFlags());
     doc.setSummary(randomSummary());
     doc.setCancellation(randomCancellation());
-
     doc.setResultProducts(randomResultProducts());
     doc.setCreatedAt(LocalDateTime.now());
 
@@ -95,19 +90,22 @@ public class ConsultationSummaryDummyGenerator {
         .build();
   }
 
-  private List<String> randomRiskFlags() {
+  private List<ConsultationSummary.RiskFlag> randomRiskFlags() {
 
     if (random.nextInt(100) < 2 &&
         cache.getRiskTypes() != null &&
         !cache.getRiskTypes().isEmpty()) {
 
-      List<String> codes =
-          new ArrayList<>(cache.getRiskTypes().keySet());
+      List<String> codes = new ArrayList<>(cache.getRiskTypes().keySet());
+      String selected = codes.get(random.nextInt(codes.size()));
+      String level = RISK_LEVELS.get(random.nextInt(RISK_LEVELS.size()));
 
-      String selected =
-          codes.get(random.nextInt(codes.size()));
-
-      return List.of(selected);
+      return List.of(
+          ConsultationSummary.RiskFlag.builder()
+              .riskType(selected)
+              .riskLevel(level)
+              .build()
+      );
     }
 
     return null;
@@ -165,21 +163,17 @@ public class ConsultationSummaryDummyGenerator {
 
   private Double randomSatisfiedScore() {
 
-    // 60% 확률로 null
-    if (random.nextInt(100) < 60) {
-      return null;
-    }
+    if (random.nextInt(100) < 60) return null;
 
-    // 0.0 ~ 5.0 (소수 1자리 반올림)
     double score = random.nextDouble(0.0, 5.0);
     return Math.round(score * 10) / 10.0;
   }
 
   private List<ConsultationSummary.ResultProducts> randomResultProducts() {
+
     int count = randomCount();
-    if (count == 0) {
-      return null;
-    }
+    if (count == 0) return null;
+
     List<ConsultationSummary.ResultProducts> list = new ArrayList<>();
     for (int i = 0; i < count; i++) {
       list.add(buildSingleResultProduct());
@@ -191,20 +185,17 @@ public class ConsultationSummaryDummyGenerator {
 
     int percent = random.nextInt(100);
 
-    if (percent < 70) {
-      return random.nextInt(3); // 0~2
-    } else {
-      return random.nextInt(2) + 3; // 3~4
-    }
+    if (percent < 70) return random.nextInt(3);
+    else return random.nextInt(2) + 3;
   }
 
   private ConsultationSummary.ResultProducts buildSingleResultProduct() {
     String changeType = randomChangeType();
     return switch (changeType) {
-      case "NEW" -> buildNewProducts(changeType);
+      case "NEW"    -> buildNewProducts(changeType);
       case "CANCEL" -> buildCancelProducts(changeType);
       case "CHANGE" -> buildConversionProducts(changeType);
-      case "RENEW" -> buildRecommitmentProducts(changeType);
+      case "RENEW"  -> buildRecommitmentProducts(changeType);
       default -> null;
     };
   }
@@ -221,7 +212,6 @@ public class ConsultationSummaryDummyGenerator {
   }
 
   private ConsultationSummary.ResultProducts buildNewProducts(String type) {
-
     return ConsultationSummary.ResultProducts.builder()
         .changeType(type)
         .subscribed(List.of(randomAnyProduct()))
@@ -229,7 +219,6 @@ public class ConsultationSummaryDummyGenerator {
   }
 
   private ConsultationSummary.ResultProducts buildCancelProducts(String type) {
-
     return ConsultationSummary.ResultProducts.builder()
         .changeType(type)
         .canceled(List.of(randomAnyProduct()))
@@ -258,7 +247,6 @@ public class ConsultationSummaryDummyGenerator {
   }
 
   private ConsultationSummary.ResultProducts buildRecommitmentProducts(String type) {
-
     return ConsultationSummary.ResultProducts.builder()
         .changeType(type)
         .recommitment(List.of(randomAnyProduct()))
@@ -271,16 +259,12 @@ public class ConsultationSummaryDummyGenerator {
 
     if (cache.getHomeProductCodes() != null)
       pool.addAll(cache.getHomeProductCodes());
-
     if (cache.getMobileProductCodes() != null)
       pool.addAll(cache.getMobileProductCodes());
-
     if (cache.getAdditionalProductCodes() != null)
       pool.addAll(cache.getAdditionalProductCodes());
 
-    if (pool.isEmpty()) {
-      throw new IllegalStateException("Product codes not initialized");
-    }
+    if (pool.isEmpty()) throw new IllegalStateException("Product codes not initialized");
 
     return pool.get(random.nextInt(pool.size()));
   }
