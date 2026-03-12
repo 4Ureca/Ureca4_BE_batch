@@ -38,6 +38,8 @@ public class MonthlyAgentReportSnapshot {
   private long consultCount;   // 개인 상담 처리 건수
   private double avgDurationMinutes; // 개인 평균 상담 소요 시간(분)
 
+  private double iamKeywordMatchAnalysis; // 주간 키워드 일치율
+
   private List<CategoryRanking> categoryRanking; // 처리 카테고리 순위 리스트
 
   private QualityAnalysis qualityAnalysis;                // 상담사 응대 품질 분석
