@@ -7,7 +7,6 @@ import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -31,9 +30,9 @@ public class DailyAgentReportSnapshot {
 
   private String agentName;    // 상담사 이름
 
-  private LocalDate startAt;   // 집계 시작 일자
+  private LocalDateTime startAt;   // 집계 시작 일자
 
-  private LocalDate endAt;     // 집계 종료 일자
+  private LocalDateTime endAt;     // 집계 종료 일자
 
   private long consultCount;   // 개인 상담 처리 건수 (전체)
 

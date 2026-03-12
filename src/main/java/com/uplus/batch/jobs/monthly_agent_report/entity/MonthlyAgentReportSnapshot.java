@@ -1,7 +1,6 @@
 package com.uplus.batch.jobs.monthly_agent_report.entity;
 
 import com.uplus.batch.jobs.daily_agent_report.entity.CategoryRanking;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.AccessLevel;
@@ -33,8 +32,8 @@ public class MonthlyAgentReportSnapshot {
   private Long agentId;      // 상담사 식별자
   private String agentName;  // 상담사 이름
 
-  private LocalDate startAt;   // 집계 시작 시각
-  private LocalDate endAt;     // 집계 종료 시각
+  private LocalDateTime startAt;   // 집계 시작 시각
+  private LocalDateTime endAt;     // 집계 종료 시각
 
   private long consultCount;   // 개인 상담 처리 건수
   private double avgDurationMinutes; // 개인 평균 상담 소요 시간(분)
