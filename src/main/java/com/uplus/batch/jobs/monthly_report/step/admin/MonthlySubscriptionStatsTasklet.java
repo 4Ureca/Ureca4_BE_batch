@@ -15,6 +15,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -33,18 +34,23 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
     // mysql 에서 상품 정보 전부 가져옴
     Map<String, String> productMasterMap = loadProductMaster();
 
-    // 1. 집계 기간 설정 (데이터가 있는 2025년 1월로 테스트)
-    LocalDateTime startAt = LocalDateTime.of(2025, 1, 1, 0, 0, 0);
-    LocalDateTime endAt = LocalDateTime.of(2025, 1, 31, 23, 59, 59);
+    // 1. 집계 기간 설정 — Job 파라미터 우선, 없으면 지난달 1일 ~ 말일
+    Map<String, Object> jobParams = chunkContext.getStepContext().getJobParameters();
+    String startDateStr = (String) jobParams.get("startDate");
+    String endDateStr = (String) jobParams.get("endDate");
 
-    /* [월별 운영용] 배치가 실행되는 시점 기준 "지난달 1일 ~ 말일" 계산
-    LocalDate now = LocalDate.now();
-    LocalDate lastMonth = now.minusMonths(1);
+    LocalDateTime startAt;
+    LocalDateTime endAt;
 
-    LocalDateTime startAt = lastMonth.withDayOfMonth(1).atStartOfDay(); // 지난달 1일 00:00:00
-    LocalDateTime endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth())
-        .atTime(23, 59, 59); // 지난달 말일 23:59:59
-    */
+    if (startDateStr != null && endDateStr != null) {
+      startAt = LocalDate.parse(startDateStr).atStartOfDay();
+      endAt = LocalDate.parse(endDateStr).atTime(23, 59, 59);
+    } else {
+      LocalDate now = LocalDate.now();
+      LocalDate lastMonth = now.minusMonths(1);
+      startAt = lastMonth.withDayOfMonth(1).atStartOfDay();
+      endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()).atTime(23, 59, 59);
+    }
 
 
     log.info("[MonthlyStats] 월별 리포트 집계 시작: {} ~ {}", startAt, endAt);

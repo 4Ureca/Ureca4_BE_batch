@@ -16,7 +16,10 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -34,18 +37,24 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
     // mysql 에서 상품 정보 가져옴
     Map<String, String> productMasterMap = loadProductMaster();
 
-    // 1. 집계 기간 설정 (데이터가 있는 2025년 1월로 테스트)
-    LocalDateTime startAt = LocalDateTime.of(2025, 1, 13, 0, 0, 0);
-    LocalDateTime endAt = LocalDateTime.of(2025, 1, 19, 23, 59, 59);
+    // 1. 집계 기간 설정 — Job 파라미터 우선, 없으면 지난주 월~일
+    Map<String, Object> jobParams = chunkContext.getStepContext().getJobParameters();
+    String startDateStr = (String) jobParams.get("startDate");
+    String endDateStr = (String) jobParams.get("endDate");
 
-    /** [운영용] 배치가 실행되는 시점 기준 "지난주 월요일 ~ 일요일" 계산 **/
-//    LocalDate now = LocalDate.now();
-//    LocalDateTime startAt = now.minusWeeks(1)
-//        .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
-//        .atStartOfDay(); // 지난주 월요일 00:00:00
-//
-//    LocalDateTime endAt = startAt.plusDays(6)
-//        .with(java.time.LocalTime.of(23, 59, 59)); // 지난주 일요일 23:59:59
+    LocalDateTime startAt;
+    LocalDateTime endAt;
+
+    if (startDateStr != null && endDateStr != null) {
+      startAt = LocalDate.parse(startDateStr).atStartOfDay();
+      endAt = LocalDate.parse(endDateStr).atTime(23, 59, 59);
+    } else {
+      LocalDate now = LocalDate.now();
+      startAt = now.minusWeeks(1)
+          .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+          .atStartOfDay();
+      endAt = startAt.plusDays(6).toLocalDate().atTime(23, 59, 59);
+    }
 
 
     log.info("[WeeklyStats] 주별 리포트 집계 시작: {} ~ {}", startAt, endAt);
