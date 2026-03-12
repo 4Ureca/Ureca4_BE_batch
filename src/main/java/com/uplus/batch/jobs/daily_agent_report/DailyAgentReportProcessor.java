@@ -76,6 +76,7 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
     MatchOperation match = Aggregation.match(
         Criteria.where("agent._id").is(agentId)
             .and("consultedAt").gte(startDt).lte(endDt)
+            .and("source").ne("SYNTHETIC")  // 합성 데이터 리포트 왜곡 방지
     );
 
 
@@ -109,7 +110,8 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
 
     Aggregation aggregation = Aggregation.newAggregation(
         Aggregation.match(Criteria.where("agent._id").is(agentId)
-            .and("consultedAt").gte(start).lte(end)),
+            .and("consultedAt").gte(start).lte(end)
+            .and("source").ne("SYNTHETIC")),  // 합성 데이터 리포트 왜곡 방지
 
         Aggregation.group("agent._id")
             .count().as("count")

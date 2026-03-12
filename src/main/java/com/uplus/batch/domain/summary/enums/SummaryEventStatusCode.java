@@ -5,7 +5,7 @@ import lombok.RequiredArgsConstructor;
 
 @Getter
 @RequiredArgsConstructor
-public enum SummaryEventStatus {
+public enum SummaryEventStatusCode {
 
   REQUESTED("requested"),
   COMPLETED("completed"),

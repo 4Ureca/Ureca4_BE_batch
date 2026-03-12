@@ -52,6 +52,8 @@ public class MonthlyAgentReportProcessor implements
     long totalSurveyTotalCount = 0;    // 월간 설문 요청 총합
     long totalSurveyResponseCount = 0; // 월간 설문 응답 총합
 
+    double totalIamMatchRateSum = 0; // IAM 일치율 합산 변수
+
     Map<String, CategoryRanking> combinedRankings = new HashMap<>();
 
     for (DailyAgentReportSnapshot day : dailySnapshots) {
@@ -61,6 +63,9 @@ public class MonthlyAgentReportProcessor implements
       // 가중치 계산을 위한 합산 (건수가 0인 날은 제외됨)
       totalDurationSum += (day.getAvgDurationMinutes() * dayCount);
       totalSatisfactionSum += (day.getCustomerSatisfactionAnalysis().getSatisfactionScore() * dayCount);
+
+      // 일별 일치율 * 상담건수 합산
+      totalIamMatchRateSum += (day.getIamKeywordMatchAnalysis() * dayCount);
 
       // 일별 설문 카운트 합산 (가중 평균용)
       if (day.getCustomerSatisfactionAnalysis() != null) {
@@ -80,6 +85,9 @@ public class MonthlyAgentReportProcessor implements
     // 3. 최종 월별 지표 산출
     double monthlyAvgDuration = totalConsultCount > 0 ? totalDurationSum / totalConsultCount : 0;
     double monthlyAvgSatisfaction = totalConsultCount > 0 ? totalSatisfactionSum / totalConsultCount : 0;
+
+    // 월간 가중 평균 일치율 계산
+    double monthlyIamMatchRate = totalConsultCount > 0 ? totalIamMatchRateSum / totalConsultCount : 0;
 
     // 월간 평균 응답률 계산
     double monthlyAvgResponseRate = totalSurveyTotalCount > 0
@@ -101,6 +109,7 @@ public class MonthlyAgentReportProcessor implements
         .endAt(endAt)
         .consultCount(totalConsultCount)
         .avgDurationMinutes(monthlyAvgDuration) // 주간 가중 평균 소요 시간
+        .iamKeywordMatchAnalysis(monthlyIamMatchRate) // 최종 월간 일치율 반영
         .customerSatisfactionAnalysis(
             MonthlyAgentReportSnapshot.CustomerSatisfactionAnalysis.builder()
                 .satisfactionScore(monthlyAvgSatisfaction)

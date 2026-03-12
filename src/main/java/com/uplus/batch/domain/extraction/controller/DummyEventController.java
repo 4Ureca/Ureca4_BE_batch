@@ -1,5 +1,6 @@
 package com.uplus.batch.domain.extraction.controller;
 
+import com.uplus.batch.domain.summary.service.ConsultationSummaryGenerator;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -16,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 public class DummyEventController {
 
     private final JdbcTemplate jdbcTemplate;
+    private final ConsultationSummaryGenerator summaryGenerator;
 
     // 1. 분석 대기열 및 결과 테이블 초기화 (새로 추가된 기능)
     @PostMapping("/clear-analysis")
@@ -41,7 +43,22 @@ public class DummyEventController {
         }
     }
 
-    // 2. 기존 이벤트 상태 대기열 생성 로직
+    // 2. summary_event_status + result_event_status 동시 발행
+    @PostMapping("/publish-events")
+    public String publishEvents(
+            @RequestParam Long startId,
+            @RequestParam Long endId) {
+        log.info("[Dummy] 이벤트 발행 시작: consultId {} ~ {}", startId, endId);
+        try {
+            int count = summaryGenerator.publishEvents(startId, endId);
+            return String.format("Successfully published %d event(s) (REQUESTED)", count);
+        } catch (Exception e) {
+            log.error("[Dummy] 이벤트 발행 중 오류: {}", e.getMessage());
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    // 3. 기존 이벤트 상태 대기열 생성 로직 (result_event_status 단독)
     @PostMapping("/event-status")
     public String generateEventStatus(
             @RequestParam Long startId,
