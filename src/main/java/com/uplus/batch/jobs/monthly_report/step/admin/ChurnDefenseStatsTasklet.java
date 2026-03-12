@@ -13,6 +13,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -43,8 +44,20 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) {
 
         // 1. 집계 기간 설정
-        LocalDateTime startAt = LocalDateTime.of(2025, 1, 1, 0, 0, 0);
-        LocalDateTime endAt = LocalDateTime.of(2025, 1, 31, 23, 59, 59);
+        var jobParams = chunkContext.getStepContext().getJobParameters();
+        String startDateStr = (String) jobParams.get("startDate");
+        String endDateStr = (String) jobParams.get("endDate");
+
+        LocalDateTime startAt;
+        LocalDateTime endAt;
+        if (startDateStr != null && endDateStr != null) {
+            startAt = LocalDate.parse(startDateStr).atStartOfDay();
+            endAt = LocalDate.parse(endDateStr).atTime(23, 59, 59);
+        } else {
+            LocalDate lastMonth = LocalDate.now().minusMonths(1);
+            startAt = lastMonth.withDayOfMonth(1).atStartOfDay();
+            endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()).atTime(23, 59, 59);
+        }
 
         log.info("[ChurnDefense] 해지방어 패턴 분석 시작: {} ~ {}", startAt, endAt);
 
@@ -117,10 +130,8 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
             String gender = (customer != null) ? customer.getString("gender") : null;
 
             String customerType;
-            if (ageGroup != null && gender != null) {
-                customerType = ageGroup + " " + gender;
-            } else if (ageGroup != null) {
-                customerType = ageGroup;
+            if (ageGroup != null) {
+                customerType = ageGroup + " " + (gender != null ? gender : "미상");
             } else {
                 customerType = "기타";
             }

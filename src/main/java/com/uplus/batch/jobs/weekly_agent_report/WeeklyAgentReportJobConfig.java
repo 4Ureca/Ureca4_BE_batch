@@ -17,6 +17,8 @@ import org.springframework.batch.item.support.ListItemReader;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.transaction.PlatformTransactionManager;
 
 @Configuration
@@ -58,7 +60,14 @@ public class WeeklyAgentReportJobConfig {
 
   @Bean
   public ItemWriter<WeeklyAgentReportSnapshot> weeklySnapshotWriter() {
-    // 주별 리포트 전용 컬렉션에 저장함
-    return items -> items.forEach(item -> mongoTemplate.save(item, "weekly_agent_report_snapshot"));
+    // 주별 리포트 전용 컬렉션에 저장 (동일 agentId+startAt 존재 시 교체)
+    return items -> items.forEach(item -> {
+      Query query = new Query(
+          Criteria.where("agentId").is(item.getAgentId())
+              .and("startAt").is(item.getStartAt())
+      );
+      mongoTemplate.remove(query, "weekly_agent_report_snapshot");
+      mongoTemplate.save(item, "weekly_agent_report_snapshot");
+    });
   }
 }

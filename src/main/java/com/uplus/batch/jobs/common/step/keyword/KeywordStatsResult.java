@@ -45,6 +45,15 @@ public class KeywordStatsResult {
     @AllArgsConstructor
     public static class CustomerTypeKeyword {
         private String customerType;
-        private List<String> keywords;
+        private List<CustomerKeywordCount> keywords;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CustomerKeywordCount {
+        private String keyword;
+        private long count;
     }
 }

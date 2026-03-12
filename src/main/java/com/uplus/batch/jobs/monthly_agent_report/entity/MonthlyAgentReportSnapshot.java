@@ -1,7 +1,6 @@
 package com.uplus.batch.jobs.monthly_agent_report.entity;
 
 import com.uplus.batch.jobs.daily_agent_report.entity.CategoryRanking;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import lombok.AccessLevel;
@@ -31,9 +30,10 @@ public class MonthlyAgentReportSnapshot {
 
   @Indexed
   private Long agentId;      // 상담사 식별자
+  private String agentName;  // 상담사 이름
 
-  private LocalDate startAt;   // 집계 시작 시각
-  private LocalDate endAt;     // 집계 종료 시각
+  private LocalDateTime startAt;   // 집계 시작 시각
+  private LocalDateTime endAt;     // 집계 종료 시각
 
   private long consultCount;   // 개인 상담 처리 건수
   private double avgDurationMinutes; // 개인 평균 상담 소요 시간(분)
@@ -54,14 +54,16 @@ public class MonthlyAgentReportSnapshot {
 
   @Data
   public static class QualityAnalysis {
-    private long greetingCount;           // 인사말 포함 상담 건수
-    private double greetingRate;          // 인사말 포함 비율(%)
-    private long empathyExpressionCount;  // 공감 표현 총 횟수
-    private double avgEmpathyPerConsult;  // 상담 1건당 평균 공감 표현 횟수
-    private double personalizationRate;   // 고객 이름 포함 응대 비율(%)
-    private double closingRate;           // 마무리 멘트 포함 비율(%)
-    private double waitingGuideRate;      // 대기 안내 포함 비율(%)
-    private double totalScore;            // 응대 품질 종합 점수 (0~5)
+    private long empathyCount;            // 공감 표현 등장 총 횟수
+    private double avgEmpathyPerConsult;  // 건당 평균 공감 횟수
+    private double apologyRate;           // 사과 표현 포함 비율 (%)
+    private double closingRate;           // 마무리 멘트 포함 비율 (%)
+    private double courtesyRate;          // 친절 표현 포함 비율 (%)
+    private double promptnessRate;        // 신속 응대 표현 포함 비율 (%)
+    private double accuracyRate;          // 정확 응대 표현 포함 비율 (%)
+    private double waitingGuideRate;      // 대기 안내 포함 비율 (%)
+    private long analyzedCount;           // 분석 대상 상담 건수
+    private double totalScore;            // 종합 점수 (0~5)
   }
 
   @Data
@@ -70,5 +72,7 @@ public class MonthlyAgentReportSnapshot {
   public static class CustomerSatisfactionAnalysis {
     private double satisfactionScore; // 월별 평균 점수
     private double responseRate; //응답률
+    private long surveyTotalCount;    // 설문 요청 수
+    private long surveyResponseCount; // 설문 응답 수
   }
 }

@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import java.util.List;
 import java.time.LocalDateTime;
+import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -15,6 +16,8 @@ public class MonthlyReportSnapshot {
   private String id;
   private LocalDateTime startAt;
   private LocalDateTime endAt;
+  @CreatedDate
+  private LocalDateTime createdAt;
   private SubscriptionAnalysis subscriptionAnalysis;
   private Object keywordSummary;  // 키워드 분석 (topKeywords, longTermTopKeywords, byCustomerType)
 
