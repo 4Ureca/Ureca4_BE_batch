@@ -1,5 +1,9 @@
 package com.uplus.batch.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.time.LocalDateTime;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
@@ -22,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @RequestMapping("/api/jobs")
 @RequiredArgsConstructor
+@Tag(name = "배치 수동 실행", description = "관리자/상담사 리포트 배치를 수동으로 실행합니다")
 public class AnalysisJobController {
 
     private final JobLauncher jobLauncher;
@@ -39,20 +44,11 @@ public class AnalysisJobController {
 
     // ==================== 관리자 리포트 엔드포인트 ====================
 
-    /**
-     * 일별 관리자 리포트 통합 배치 실행
-     * Step: performance → keyword → customerRisk → hourlyConsult
-     *
-     * @param date 집계 대상 날짜 (yyyy-MM-dd)
-     * @param slot 시간대 슬롯 (09-12, 12-15, 15-18). 생략 시 현재 시간 기준.
-     *
-     * curl -X POST "http://localhost:8081/api/jobs/run-daily-batch?date=2025-01-18"
-     * curl -X POST "http://localhost:8081/api/jobs/run-daily-batch?date=2025-01-18&slot=09-12"
-     */
+    @Operation(summary = "② 일별 관리자 리포트 배치 (슬롯별 3회)", description = "performance → keyword → customerRisk → hourlyConsult 순서로 실행")
     @PostMapping("/run-daily-batch")
     public ResponseEntity<String> runDailyBatch(
-            @RequestParam String date,
-            @RequestParam(required = false) String slot
+            @Parameter(description = "집계 대상 날짜", example = "2025-01-18") @RequestParam String date,
+            @Parameter(description = "시간대 슬롯. 생략 시 현재 시간 기준", schema = @Schema(allowableValues = {"09-12", "12-15", "15-18"})) @RequestParam(required = false) String slot
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
@@ -78,16 +74,11 @@ public class AnalysisJobController {
         }
     }
 
-    /**
-     * 주별 관리자 리포트 통합 배치 실행
-     * Step: performance → keyword → subscription
-     *
-     * curl -X GET "http://localhost:8081/api/jobs/run-weekly-batch?startDate=2025-01-13&endDate=2025-01-19"
-     */
+    @Operation(summary = "④ 주별 관리자 리포트 배치", description = "performance → keyword → subscription 순서로 실행")
     @GetMapping("/run-weekly-batch")
     public ResponseEntity<String> runWeeklyBatch(
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate
+            @Parameter(description = "시작일 (월요일)", example = "2025-01-13") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (일요일)", example = "2025-01-19") @RequestParam(required = false) String endDate
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
@@ -112,16 +103,11 @@ public class AnalysisJobController {
         }
     }
 
-    /**
-     * 월별 관리자 리포트 통합 배치 실행
-     * Step: performance → keyword → subscription → churnDefense → customerRisk
-     *
-     * curl -X GET "http://localhost:8081/api/jobs/run-monthly-batch?startDate=2025-01-01&endDate=2025-01-31"
-     */
+    @Operation(summary = "⑥ 월별 관리자 리포트 배치", description = "performance → keyword → subscription → churnDefense → customerRisk 순서로 실행")
     @GetMapping("/run-monthly-batch")
     public ResponseEntity<String> runMonthlyBatch(
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate
+            @Parameter(description = "시작일 (1일)", example = "2025-01-01") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (말일)", example = "2025-01-31") @RequestParam(required = false) String endDate
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
@@ -148,13 +134,10 @@ public class AnalysisJobController {
 
     // ==================== 상담사 리포트 엔드포인트 ====================
 
-    /**
-     * 상담사 일별 리포트 배치 수동 실행
-     * 호출: http://localhost:8081/api/jobs/daily-agent-report?date=2025-01-18
-     */
+    @Operation(summary = "① 일별 상담사 리포트 배치", description = "상담사별 일별 개인 리포트 생성")
     @GetMapping("/daily-agent-report")
     public String runDailyAgentReportJob(
-            @RequestParam(required = false) String date
+            @Parameter(description = "집계 대상 날짜 (생략 시 어제)", example = "2025-01-18") @RequestParam(required = false) String date
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
@@ -173,14 +156,11 @@ public class AnalysisJobController {
         }
     }
 
-    /**
-     * 상담사 주별 리포트 배치 수동 실행
-     * 호출: http://localhost:8081/api/jobs/weekly-agent-report?startDate=2025-01-13&endDate=2025-01-19
-     */
+    @Operation(summary = "③ 주별 상담사 리포트 배치", description = "상담사별 주별 개인 리포트 생성 (생략 시 지난주)")
     @GetMapping("/weekly-agent-report")
     public String runWeeklyAgentReportJob(
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate
+            @Parameter(description = "시작일 (월요일)", example = "2025-01-13") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (일요일)", example = "2025-01-19") @RequestParam(required = false) String endDate
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
@@ -203,14 +183,11 @@ public class AnalysisJobController {
         }
     }
 
-    /**
-     * 상담사 월별 리포트 배치 수동 실행
-     * 호출: http://localhost:8081/api/jobs/monthly-agent-report?startDate=2025-01-01&endDate=2025-01-31
-     */
+    @Operation(summary = "⑤ 월별 상담사 리포트 배치", description = "상담사별 월별 개인 리포트 생성 (생략 시 지난달)")
     @GetMapping("/monthly-agent-report")
     public String runMonthlyAgentReportJob(
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate
+            @Parameter(description = "시작일 (1일)", example = "2025-01-01") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (말일)", example = "2025-01-31") @RequestParam(required = false) String endDate
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
