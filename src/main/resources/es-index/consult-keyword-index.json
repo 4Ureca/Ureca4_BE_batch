@@ -16,9 +16,13 @@
         }
       },
       "filter": {
-        "nori_pos_filter": {
+        "search_pos_filter": {
           "type": "nori_part_of_speech",
           "stoptags": ["E","IC","J","MAG","MAJ","MM","SP","SSC","SSO","SC","SE","VA","VV","VX","VCP","VCN","XPN","XSA","XSN","XSV","UNA","NA","VSV"]
+        },
+        "quality_pos_filter": {
+          "type": "nori_part_of_speech",
+          "stoptags": ["E","IC","J","MAG","MAJ","MM","SP","SSC","SSO","SC","SE","VV","VX","VCP","VCN","XPN","XSA","XSN","XSV","UNA","NA","VSV"]
         },
         "search_stop": { "type": "stop", "stopwords_path": "analysis/stopwords.txt" },
         "quality_stop": { "type": "stop", "stopwords_path": "analysis/analysis_stopwords.txt" },
@@ -29,12 +33,12 @@
         "search_analyzer": {
           "type": "custom",
           "tokenizer": "search_nori",
-          "filter": ["lowercase", "nori_pos_filter", "search_stop", "search_synonym"]
+          "filter": ["lowercase", "search_pos_filter", "search_stop", "search_synonym"]
         },
         "quality_analyzer": {
           "type": "custom",
           "tokenizer": "quality_nori",
-          "filter": ["lowercase", "nori_pos_filter", "quality_stop", "quality_synonym"]
+          "filter": ["lowercase", "quality_pos_filter", "quality_stop", "quality_synonym"]
         }
       }
     }
