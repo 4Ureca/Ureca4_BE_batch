@@ -18,7 +18,7 @@
       "filter": {
         "nori_pos_filter": {
           "type": "nori_part_of_speech",
-          "stoptags": ["E","IC","J","MAG","MAJ","MM","SP","SSC","SSO","SC","SE","XPN","XSA","XSN","XSV","UNA","NA","VSV"]
+          "stoptags": ["E","IC","J","MAG","MAJ","MM","SP","SSC","SSO","SC","SE","VA","VV","VX","VCP","VCN","XPN","XSA","XSN","XSV","UNA","NA","VSV"]
         },
         "search_stop": { "type": "stop", "stopwords_path": "analysis/stopwords.txt" },
         "quality_stop": { "type": "stop", "stopwords_path": "analysis/analysis_stopwords.txt" },
