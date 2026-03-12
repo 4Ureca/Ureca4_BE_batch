@@ -25,6 +25,7 @@ public class ConsultationResultRepository {
              c.phone,
              c.grade_code,
              c.birth_date,
+             c.gender,
              cr.category_code,
              cp.large_category,
              cp.medium_category,
@@ -56,7 +57,9 @@ public class ConsultationResultRepository {
             rs.getString("customer_type"),
             rs.getString("phone"),
             rs.getString("grade_code"),
-            rs.getDate("birth_date").toLocalDate(),
+            rs.getDate("birth_date") != null
+                ? rs.getDate("birth_date").toLocalDate() : null,
+            rs.getString("gender"),
 
             rs.getString("category_code"),
             rs.getString("large_category"),

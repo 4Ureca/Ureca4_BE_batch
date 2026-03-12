@@ -1,7 +1,9 @@
 package com.uplus.batch.jobs.raw_text_dummy.generator;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -43,19 +45,227 @@ public class RawTextGenerator {
     }
 
     // ───────────────────────────────────────────────
+    // 채널별 인사말 / 맺음말 (4단계 흐름: 인사→불만→응대→맺음말)
+    // ───────────────────────────────────────────────
+
+    private static final List<Turn> CALL_GREETINGS = List.of(
+        a("안녕하세요, LG U+ 고객센터입니다. 어떻게 도와드릴까요?"),
+        a("네, LG U+ 고객센터입니다. 말씀해주세요."),
+        a("안녕하세요, U+ 고객센터입니다. 무엇을 도와드릴까요?")
+    );
+
+    private static final List<Turn> CHAT_GREETINGS = List.of(
+        a("안녕하세요. LG U+ 채팅 상담입니다. 문의 사항을 입력해 주세요."),
+        a("안녕하세요. U+ 채팅 상담사입니다. 어떤 도움이 필요하신가요?"),
+        a("안녕하세요. LG U+ 입니다. 무엇을 도와드릴까요?")
+    );
+
+    // ───────────────────────────────────────────────
+    // 응대품질 평가 8대 항목 (평가 키워드 풀)
+    // 순서: 본문 주입 6개 → 맺음말 주입 2개
+    // ───────────────────────────────────────────────
+
+    private static final Map<String, List<String>> QUALITY_POOL = new LinkedHashMap<>();
+    private static final List<String> QUALITY_KEYS;
+
+    static {
+        // ── 본문에 주입 (인사 직후 ~ 대화 중반) ─────────────────────────
+        QUALITY_POOL.put("공감응대",  List.of(
+            "고객님 많이 불편하셨겠네요.",
+            "충분히 이해합니다.",
+            "정말 속상하셨겠어요."
+        ));
+        QUALITY_POOL.put("사과표현",  List.of(
+            "불편을 드려 정말 죄송합니다.",
+            "먼저 사과 드립니다.",
+            "불편하게 해드려서 죄송합니다."
+        ));
+        QUALITY_POOL.put("친절응대",  List.of(
+            "기꺼이 도와드리겠습니다.",
+            "최선을 다해 안내해드리겠습니다.",
+            "친절하게 안내해드리겠습니다."
+        ));
+        QUALITY_POOL.put("신속응대",  List.of(
+            "바로 처리해드리겠습니다.",
+            "즉시 확인해드리겠습니다.",
+            "신속하게 처리해드리겠습니다."
+        ));
+        QUALITY_POOL.put("정확응대",  List.of(
+            "정확한 안내를 위해 확인해드리겠습니다.",
+            "정확히 말씀드리면,",
+            "정확하게 안내해드리겠습니다."
+        ));
+        QUALITY_POOL.put("대기안내",  List.of(
+            "잠시만 기다려주세요.",
+            "잠시 대기 부탁드립니다.",
+            "확인하는 동안 잠시만요."
+        ));
+        // ── 맺음말에 주입 ────────────────────────────────────────────────
+        QUALITY_POOL.put("감사인사",  List.of(
+            "이용해 주셔서 감사합니다.",
+            "항상 U+를 이용해 주셔서 감사합니다.",
+            "도움이 되었으면 합니다. 감사합니다."
+        ));
+        QUALITY_POOL.put("마무리인사", List.of(
+            "좋은 하루 보내세요.",
+            "편안한 하루 되세요.",
+            "즐거운 하루 보내세요."
+        ));
+        QUALITY_KEYS = new ArrayList<>(QUALITY_POOL.keySet());
+    }
+
+    // ───────────────────────────────────────────────
     // 공개 API
     // ───────────────────────────────────────────────
 
-    public String generate(String categoryCode, Random random) {
+    /**
+     * 채널(CALL/CHATTING)을 고려한 원문 생성.
+     *
+     * <p>흐름: 인사말 → 본문(품질 표현 주입) → 맺음말
+     *
+     * <p>응대품질 평가 8대 항목을 무작위 배분:
+     * <ul>
+     *   <li>30% — 수행 없음 (0개)</li>
+     *   <li>35% — 일부 수행 (2~5개 랜덤)</li>
+     *   <li>35% — 모두 수행 (8개 전체)</li>
+     * </ul>
+     */
+    public String generate(String categoryCode, String channel, Random random) {
+        // 1. 본문 템플릿 선택
         boolean isChurnCategory = categoryCode != null && categoryCode.startsWith("M_CHN");
         boolean isChurnOverride  = !isChurnCategory && random.nextInt(100) < 15;
-
+        List<Turn> body;
         if (isChurnCategory || isChurnOverride) {
-            return pickAndSerialize(CHURN_TEMPLATES, random);
+            body = CHURN_TEMPLATES.get(random.nextInt(CHURN_TEMPLATES.size()));
+        } else {
+            List<List<Turn>> variants = TEMPLATES.getOrDefault(categoryCode,
+                    TEMPLATES.getOrDefault("M_ETC_04", CHURN_TEMPLATES));
+            body = variants.get(random.nextInt(variants.size()));
         }
-        List<List<Turn>> variants = TEMPLATES.getOrDefault(categoryCode,
-                TEMPLATES.getOrDefault("M_ETC_04", CHURN_TEMPLATES));
-        return pickAndSerialize(variants, random);
+
+        // 2. 응대품질 항목 결정 (30% 없음 / 35% 일부 / 35% 전체)
+        List<String> criteria = selectQualityCriteria(random);
+
+        // 3. 채널별 인사말 + 품질 주입 본문 + 동적 맺음말 조합
+        boolean isChat = "CHATTING".equalsIgnoreCase(channel);
+        List<Turn> full = new ArrayList<>();
+        full.add((isChat ? CHAT_GREETINGS : CALL_GREETINGS).get(random.nextInt(CALL_GREETINGS.size())));
+        full.addAll(injectQuality(body, criteria, random));
+        full.addAll(buildDynamicClosing(criteria, isChat, random));
+
+        return serialize(full);
+    }
+
+    /** 하위 호환 — channel 미지정 시 CALL로 처리 */
+    public String generate(String categoryCode, Random random) {
+        return generate(categoryCode, "CALL", random);
+    }
+
+    // ───────────────────────────────────────────────
+    // 응대품질 헬퍼 메서드
+    // ───────────────────────────────────────────────
+
+    /**
+     * 응대품질 평가 기준 항목을 무작위로 선택한다.
+     * 반환된 List의 크기가 0이면 수행 없음, 8이면 모두 수행.
+     */
+    private List<String> selectQualityCriteria(Random random) {
+        int roll = random.nextInt(100);
+        if (roll < 30) {
+            return List.of(); // 수행 없음
+        } else if (roll < 65) {
+            // 일부 수행: 8개 중 2~5개 무작위
+            int count = 2 + random.nextInt(4);
+            List<String> shuffled = new ArrayList<>(QUALITY_KEYS);
+            Collections.shuffle(shuffled, random);
+            return Collections.unmodifiableList(shuffled.subList(0, Math.min(count, shuffled.size())));
+        } else {
+            return QUALITY_KEYS; // 모두 수행
+        }
+    }
+
+    /**
+     * 본문 턴에 응대품질 표현을 주입한다.
+     * 감사인사·마무리인사는 맺음말에서 처리하므로 여기서는 제외.
+     * 나머지 6개 기준을 상담사 턴 앞에 순서대로 분배한다.
+     */
+    private List<Turn> injectQuality(List<Turn> body, List<String> criteria, Random random) {
+        List<String> toInject = new ArrayList<>(criteria);
+        toInject.remove("감사인사");
+        toInject.remove("마무리인사");
+
+        if (toInject.isEmpty()) return new ArrayList<>(body);
+
+        // 상담사 턴 인덱스 수집
+        List<Integer> agentIdx = new ArrayList<>();
+        for (int i = 0; i < body.size(); i++) {
+            if ("상담사".equals(body.get(i).speaker())) agentIdx.add(i);
+        }
+        if (agentIdx.isEmpty()) return new ArrayList<>(body);
+
+        // 기준 → 턴 인덱스 슬롯 배분 (앞 턴부터 순서대로)
+        Map<Integer, List<String>> slotMap = new HashMap<>();
+        for (int i = 0; i < toInject.size(); i++) {
+            int idx = agentIdx.get(i % agentIdx.size());
+            slotMap.computeIfAbsent(idx, k -> new ArrayList<>()).add(toInject.get(i));
+        }
+
+        List<Turn> result = new ArrayList<>(body);
+        for (Map.Entry<Integer, List<String>> entry : slotMap.entrySet()) {
+            int idx = entry.getKey();
+            Turn original = result.get(idx);
+            StringBuilder sb = new StringBuilder();
+            for (String criterion : entry.getValue()) {
+                List<String> phrases = QUALITY_POOL.get(criterion);
+                sb.append(phrases.get(random.nextInt(phrases.size()))).append(" ");
+            }
+            sb.append(original.text());
+            result.set(idx, new Turn("상담사", sb.toString().trim()));
+        }
+        return result;
+    }
+
+    /**
+     * 감사인사·마무리인사 선택 여부에 따라 맺음말을 동적으로 생성한다.
+     * <ul>
+     *   <li>둘 다 선택 — "이용해 주셔서 감사합니다. 좋은 하루 보내세요."</li>
+     *   <li>감사인사만 — "이용해 주셔서 감사합니다."</li>
+     *   <li>마무리인사만 — "좋은 하루 보내세요."</li>
+     *   <li>둘 다 없음 — 중립 종료 (수행 없음 케이스)</li>
+     * </ul>
+     */
+    private List<Turn> buildDynamicClosing(List<String> criteria, boolean isChat, Random random) {
+        boolean hasThank    = criteria.contains("감사인사");
+        boolean hasFarewell = criteria.contains("마무리인사");
+
+        List<Turn> closing = new ArrayList<>();
+
+        // 추가 문의 확인 턴
+        if (isChat) {
+            closing.add(a("추가로 궁금하신 사항이 있으시면 말씀해 주세요."));
+            closing.add(c("아니요, 됐습니다."));
+        } else {
+            closing.add(a("추가로 도움이 필요하신 사항이 있으신가요?"));
+            closing.add(c("없어요."));
+        }
+
+        // 최종 인사말 (기준 조합으로 결정)
+        if (hasThank && hasFarewell) {
+            List<String> tp = QUALITY_POOL.get("감사인사");
+            List<String> fp = QUALITY_POOL.get("마무리인사");
+            closing.add(a(tp.get(random.nextInt(tp.size())) + " " + fp.get(random.nextInt(fp.size()))));
+        } else if (hasThank) {
+            List<String> tp = QUALITY_POOL.get("감사인사");
+            closing.add(a(tp.get(random.nextInt(tp.size()))));
+        } else if (hasFarewell) {
+            List<String> fp = QUALITY_POOL.get("마무리인사");
+            closing.add(a(fp.get(random.nextInt(fp.size()))));
+        } else {
+            // 수행 없음: 중립 종료
+            closing.add(isChat ? a("상담이 종료됩니다.") : a("확인 완료되었습니다. 전화해 주셔서 감사합니다."));
+        }
+
+        return closing;
     }
 
     // ───────────────────────────────────────────────
