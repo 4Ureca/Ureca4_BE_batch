@@ -1,8 +1,3 @@
--- ============================================================
--- 과거 상담 데이터 통합 배치 — 체크포인트 테이블 DDL
--- 배치 실행 전 MySQL에 수동으로 적용하세요.
--- ============================================================
-
 CREATE TABLE IF NOT EXISTS historical_batch_log (
     id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
     target_date     DATE         NOT NULL                  COMMENT '처리 대상 날짜',
