@@ -64,7 +64,7 @@ public class RetryScheduler {
         try {
             List<SummaryEventStatus> failedTasks =
                     summaryEventStatusRepo.findByStatusAndRetryCountLessThan(
-                            com.uplus.batch.domain.summary.enums.SummaryEventStatus.FAILED.getValue(), 3);
+                            com.uplus.batch.domain.summary.enums.SummaryEventStatusCode.FAILED.getValue(), 3);
 
             if (failedTasks.isEmpty()) return;
 

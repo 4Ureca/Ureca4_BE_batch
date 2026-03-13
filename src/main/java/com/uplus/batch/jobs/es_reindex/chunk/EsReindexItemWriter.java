@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uplus.batch.domain.summary.dto.RawTextRow;
 import com.uplus.batch.domain.summary.entity.ConsultationSummary;
 import com.uplus.batch.domain.summary.repository.SummaryEventStatusRepository;
+import com.uplus.batch.domain.summary.service.SummaryProcessingLockService;
 import com.uplus.batch.jobs.summary_sync.chunk.KeywordProcessor;
 import com.uplus.batch.jobs.summary_sync.chunk.KeywordProcessor.KeywordResult;
 import com.uplus.batch.jobs.summary_sync.chunk.SearchDocBuilder;
@@ -33,6 +34,7 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
   private final ElasticsearchOperations elasticsearchOperations;
   private final MongoTemplate mongoTemplate;
   private final SummaryEventStatusRepository summaryEventStatusRepository;
+  private final SummaryProcessingLockService lockService;
   private final KeywordProcessor keywordProcessor;
   private final SearchDocBuilder searchDocBuilder;
   private final ObjectMapper objectMapper;
@@ -99,21 +101,25 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
       if (!searchDocs.isEmpty())
         elasticsearchOperations.bulkIndex(searchDocs, IndexCoordinates.of("consult-search-index"));
 
+      log.info("keywordDocs size={}, searchDocs size={}", keywordDocs.size(), searchDocs.size());
+
       if (!keywordDocs.isEmpty())
         elasticsearchOperations.bulkIndex(keywordDocs, IndexCoordinates.of("consult-keyword-index"));
 
-      markIndexed(successIds);
+      if (!searchDocs.isEmpty()) markSearchIndexed(successIds);
+      if (!keywordDocs.isEmpty()) markKeywordIndexed(successIds);
       log.info("ES 재처리 완료: {}건", successIds.size());
 
     } catch (Exception e) {
       log.error("ES 재처리 bulkIndex 실패. searchIndexed=false 유지. consultIds={}", successIds, e);
+    } finally {
+      successIds.forEach(lockService::reindexUnlock);
     }
   }
 
-  private void markIndexed(List<Long> consultIds) {
+  private void markSearchIndexed(List<Long> consultIds) {
     BulkOperations bulk =
         mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, ConsultationSummary.class);
-
     for (Long consultId : consultIds) {
       bulk.updateOne(
           Query.query(Criteria.where("consultId").is(consultId)),
@@ -122,7 +128,20 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
               .set("searchIndexedAt", LocalDateTime.now())
       );
     }
+    bulk.execute();
+  }
 
+  private void markKeywordIndexed(List<Long> consultIds) {
+    BulkOperations bulk =
+        mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, ConsultationSummary.class);
+    for (Long consultId : consultIds) {
+      bulk.updateOne(
+          Query.query(Criteria.where("consultId").is(consultId)),
+          new Update()
+              .set("keywordIndexed", true)
+              .set("keywordIndexedAt", LocalDateTime.now())
+      );
+    }
     bulk.execute();
   }
 

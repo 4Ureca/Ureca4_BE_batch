@@ -1,0 +1,63 @@
+{
+  "settings": {
+    "number_of_shards": 3,
+    "number_of_replicas": 1,
+    "analysis": {
+      "tokenizer": {
+        "search_nori": {
+          "type": "nori_tokenizer",
+          "user_dictionary": "analysis/userdict.txt",
+          "decompound_mode": "discard"
+        },
+        "quality_nori": {
+          "type": "nori_tokenizer",
+          "user_dictionary": "analysis/analysis_userdict.txt",
+          "decompound_mode": "discard"
+        }
+      },
+      "filter": {
+        "nori_pos_filter": {
+          "type": "nori_part_of_speech",
+          "stoptags": ["E","IC","J","MAG","MAJ","MM","SP","SSC","SSO","SC","SE","XPN","XSA","XSN","XSV","UNA","NA","VSV"]
+        },
+        "search_stop": { "type": "stop", "stopwords_path": "analysis/stopwords.txt" },
+        "quality_stop": { "type": "stop", "stopwords_path": "analysis/analysis_stopwords.txt" },
+        "search_synonym": { "type": "synonym_graph", "synonyms_path": "analysis/synonyms.txt" },
+        "quality_synonym": { "type": "synonym_graph", "synonyms_path": "analysis/analysis_synonyms.txt" }
+      },
+      "analyzer": {
+        "search_analyzer": {
+          "type": "custom",
+          "tokenizer": "search_nori",
+          "filter": ["lowercase", "nori_pos_filter", "search_stop", "search_synonym"]
+        },
+        "quality_analyzer": {
+          "type": "custom",
+          "tokenizer": "quality_nori",
+          "filter": ["lowercase", "nori_pos_filter", "quality_stop", "quality_synonym"]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "agent": {
+        "type": "text",
+        "fields": {
+          "search": { "type": "text", "analyzer": "search_analyzer", "fielddata": true },
+          "quality": { "type": "text", "analyzer": "quality_analyzer", "fielddata": true }
+        }
+      },
+      "customer": {
+        "type": "text",
+        "fields": {
+          "search": { "type": "text", "analyzer": "search_analyzer", "fielddata": true },
+          "quality": { "type": "text", "analyzer": "quality_analyzer", "fielddata": true }
+        }
+      },
+      "agent_id": { "type": "keyword" },
+      "customer_grade": { "type": "keyword" },
+      "date": { "type": "date" }
+    }
+  }
+}

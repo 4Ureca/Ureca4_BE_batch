@@ -1,11 +1,28 @@
 package com.uplus.batch.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.JobParameters;
 import org.springframework.batch.core.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,195 +39,180 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @RequestMapping("/api/jobs")
 @RequiredArgsConstructor
+@Tag(name = "배치 수동 실행", description = "관리자/상담사 리포트 배치를 수동으로 실행합니다")
 public class AnalysisJobController {
 
     private final JobLauncher jobLauncher;
-    private final Job customerRiskJob;
-    private final Job hourlyConsultJob;
-    private final Job dailyPerformanceJob;
-    private final Job weeklyPerformanceJob;
-    private final Job monthlyPerformanceJob;
+    private final JdbcTemplate jdbcTemplate;
+    private final MongoTemplate mongoTemplate;
 
-    private final Job weeklyAdminReportJob; // 주별 전체 리포트 배치
-    private final Job monthlyAdminReportJob; // 월별 리포트 Job 추가
-    private final Job dailyKeywordJob; // 일별 키워드 집계 Job
+    // ==================== 관리자 리포트 Job ====================
+    private final Job dailyAdminReportJob;   // 일별 관리자 리포트 (performance + keyword + customerRisk + hourlyConsult)
+    private final Job weeklyAdminReportJob;  // 주별 관리자 리포트 (performance + keyword + subscription)
+    private final Job monthlyAdminReportJob; // 월별 관리자 리포트 (performance + keyword + subscription + churn + customerRisk)
 
-    private final Job dailyAgentReportJob; // 일별 상담사 개인 리포트 job
-    private final Job weeklyAgentReportJob; // 주벌 상담사 개인 리포트 job
-    private final Job monthlyAgentReportJob; //월별 상담사 개인 리포트 job
+    // ==================== 상담사 리포트 Job ====================
+    private final Job dailyAgentReportJob;   // 일별 상담사 개인 리포트
+    private final Job weeklyAgentReportJob;  // 주별 상담사 개인 리포트
+    private final Job monthlyAgentReportJob; // 월별 상담사 개인 리포트
 
 
-    /**
-     * 고객 특이사항 집계 Job 실행
-     *
-     * @param targetDate 집계 대상 날짜 (yyyy-MM-dd). 생략 시 어제.
-     *
-     * curl -X POST "http://localhost:8081/api/jobs/customer-risk?targetDate=2025-01-15"
-     */
-    @PostMapping("/customer-risk")
-    public ResponseEntity<String> runCustomerRisk(
-            @RequestParam(required = false) String targetDate
-    ) throws Exception {
+    // ==================== 데이터 현황 조회 ====================
 
-        JobParametersBuilder builder = new JobParametersBuilder()
-                .addLong("runId", System.currentTimeMillis());
+    @Operation(summary = "📊 배치 실행 가능 데이터 현황",
+        description = "결과서(consultation_results) + 원문(consultation_raw_texts) + 요약문(consultation_summary) 3개가 모두 존재하는 데이터만 조회합니다. 날짜 또는 상담사 ID로 검색할 수 있습니다.")
+    @GetMapping("/data-status")
+    public ResponseEntity<Map<String, Object>> getDataStatus(
+            @Parameter(description = "검색 날짜 (생략 시 전체)", example = "2025-01-18") @RequestParam(required = false) String date,
+            @Parameter(description = "상담사 ID (생략 시 전체)", example = "1") @RequestParam(required = false) Long empId
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
 
-        if (targetDate != null && !targetDate.isBlank()) {
-            builder.addString("targetDate", targetDate);
+        // 1. MySQL: 결과서 + 원문 + 상담사 + 권한 확인
+        StringBuilder sqlBuilder = new StringBuilder("""
+            SELECT cr.consult_id, DATE(cr.created_at) AS date,
+                   e.emp_id, e.name AS agent_name,
+                   jr.role_name
+            FROM consultation_results cr
+            INNER JOIN consultation_raw_texts crt ON cr.consult_id = crt.consult_id
+            INNER JOIN employees e ON cr.emp_id = e.emp_id
+            INNER JOIN employee_details ed ON e.emp_id = ed.emp_id
+            INNER JOIN job_roles jr ON ed.job_role_id = jr.job_role_id
+            WHERE 1=1
+            """);
+        if (date != null && !date.isBlank()) {
+            sqlBuilder.append(" AND DATE(cr.created_at) = '").append(date).append("'");
+        }
+        if (empId != null) {
+            sqlBuilder.append(" AND cr.emp_id = ").append(empId);
+        }
+        sqlBuilder.append(" ORDER BY cr.created_at, cr.consult_id");
+
+        List<Map<String, Object>> mysqlRows = jdbcTemplate.queryForList(sqlBuilder.toString());
+        Set<Long> mysqlConsultIds = mysqlRows.stream()
+            .map(r -> ((Number) r.get("consult_id")).longValue())
+            .collect(Collectors.toSet());
+
+        // 2. MongoDB: 요약문 있는 consult_id 목록
+        org.springframework.data.mongodb.core.query.Query mongoQuery =
+            new org.springframework.data.mongodb.core.query.Query();
+        if (!mysqlConsultIds.isEmpty()) {
+            mongoQuery.addCriteria(Criteria.where("consultId").in(mysqlConsultIds));
+        }
+        mongoQuery.fields().include("consultId");
+        List<Map> summaryDocs = mongoTemplate.find(mongoQuery, Map.class, "consultation_summary");
+        Set<Long> summaryConsultIds = summaryDocs.stream()
+            .map(d -> ((Number) d.get("consultId")).longValue())
+            .collect(Collectors.toSet());
+
+        // 3. 3개 모두 있는 것만 필터
+        List<Map<String, Object>> readyList = mysqlRows.stream()
+            .filter(r -> summaryConsultIds.contains(((Number) r.get("consult_id")).longValue()))
+            .collect(Collectors.toList());
+
+        // 4. 날짜별 요약
+        Map<String, Long> dateSummary = readyList.stream()
+            .collect(Collectors.groupingBy(
+                r -> r.get("date").toString(),
+                LinkedHashMap::new,
+                Collectors.counting()
+            ));
+
+        result.put("total_ready", readyList.size());
+        result.put("dates", dateSummary);
+        result.put("details", readyList);
+
+        return ResponseEntity.ok(result);
+    }
+
+    @Operation(summary = "📊 MongoDB 스냅샷 생성 현황 조회",
+        description = "선택한 컬렉션의 스냅샷 현황을 조회합니다. " +
+            "count: 전체 스냅샷 문서 수 | " +
+            "dateRange: 가장 오래된 날짜 ~ 가장 최근 날짜 | " +
+            "distinctDates: 데이터가 존재하는 고유 날짜 수")
+    @GetMapping("/data-status/mongo")
+    public ResponseEntity<Map<String, Object>> getMongoSnapshotStatus(
+            @Parameter(description = "조회할 컬렉션",
+                schema = @Schema(allowableValues = {
+                    "daily_report_snapshot", "weekly_report_snapshot", "monthly_report_snapshot",
+                    "daily_agent_report_snapshot", "weekly_agent_report_snapshot", "monthly_agent_report_snapshot"
+                }))
+            @RequestParam(required = false) String collection
+    ) {
+        Map<String, Object> status = new LinkedHashMap<>();
+
+        String[] collections = collection != null && !collection.isBlank()
+            ? new String[]{collection}
+            : new String[]{
+                "daily_report_snapshot", "weekly_report_snapshot", "monthly_report_snapshot",
+                "daily_agent_report_snapshot", "weekly_agent_report_snapshot", "monthly_agent_report_snapshot"
+            };
+
+        for (String col : collections) {
+            if (mongoTemplate.collectionExists(col)) {
+                long count = mongoTemplate.count(
+                    new org.springframework.data.mongodb.core.query.Query(), col);
+                // 날짜 범위만 표시 (최소~최대)
+                List<?> dates = mongoTemplate.findDistinct(
+                    new org.springframework.data.mongodb.core.query.Query(),
+                    "startAt", col, Object.class);
+                Object minDate = dates.isEmpty() ? null : dates.get(0);
+                Object maxDate = dates.isEmpty() ? null : dates.get(dates.size() - 1);
+                status.put(col, Map.of(
+                    "count", count,
+                    "dateRange", minDate != null ? minDate + " ~ " + maxDate : "없음",
+                    "distinctDates", dates.size()
+                ));
+            } else {
+                status.put(col, Map.of("count", 0, "dateRange", "없음", "distinctDates", 0));
+            }
         }
 
-        JobParameters params = builder.toJobParameters();
-
-        log.info("[AnalysisJob] customerRiskJob 수동 실행 요청 — targetDate={}", targetDate);
-        jobLauncher.run(customerRiskJob, params);
-
-        return ResponseEntity.ok("CustomerRisk job started (targetDate=" + targetDate + ")");
+        return ResponseEntity.ok(status);
     }
 
-    /**
-     * 시간대별 이슈 트렌드 집계 Job 실행
-     *
-     * @param targetDate 집계 대상 날짜 (yyyy-MM-dd). 생략 시 오늘.
-     * @param slot       시간대 슬롯 (09-12, 12-15, 15-18). 생략 시 현재 시간 기준 직전 슬롯.
-     *
-     * curl -X POST "http://localhost:8081/api/jobs/hourly-consult?targetDate=2026-03-03&slot=09-12"
-     */
-    @PostMapping("/hourly-consult")
-    public ResponseEntity<String> runHourlyConsult(
-            @RequestParam(required = false) String targetDate,
-            @RequestParam(required = false) String slot
-    ) throws Exception {
+    // ==================== 관리자 리포트 엔드포인트 ====================
 
-        JobParametersBuilder builder = new JobParametersBuilder()
-                .addLong("runId", System.currentTimeMillis());
-
-        if (targetDate != null && !targetDate.isBlank()) {
-            builder.addString("targetDate", targetDate);
-        }
-        if (slot != null && !slot.isBlank()) {
-            builder.addString("slot", slot);
-        }
-
-        JobParameters params = builder.toJobParameters();
-
-        log.info("[AnalysisJob] hourlyConsultJob 수동 실행 요청 — targetDate={}, slot={}", targetDate, slot);
-        jobLauncher.run(hourlyConsultJob, params);
-
-        return ResponseEntity.ok("HourlyConsult job started (targetDate=" + targetDate + ", slot=" + slot + ")");
-    }
-
-    /**
-     * 일별 전체 상담 성과 집계 Job 실행
-     * * @param date 집계 날짜 (yyyy-MM-dd)
-     * * curl -X POST "http://localhost:8081/api/jobs/daily-performance?date=2025-01-15"
-     */
-    @PostMapping("/daily-performance")
-    public ResponseEntity<String> runDailyPerformance(
-        @RequestParam String date
-    ) throws Exception {
-
-        JobParameters params = new JobParametersBuilder()
-            .addLong("runId", System.currentTimeMillis())
-            .addString("startDate", date) // 시작일과
-            .addString("endDate", date)   // 종료일을 동일하게 설정
-            .addString("targetCollection", "daily_report_snapshot") // 대상 컬렉션 지정
-            .toJobParameters();
-
-        log.info("[AnalysisJob] dailyPerformanceJob 수동 실행 요청 — {}", date);
-        // DailyReportJobConfig에서 정의한 dailyPerformanceJob을 호출합니다.
-        jobLauncher.run(dailyPerformanceJob, params);
-
-        return ResponseEntity.ok("DailyPerformance job started for " + date);
-    }
-
-
-    /**
-     * 주간 전체 상담 성과 집계 Job 실행
-     *
-     * @param startDate 집계 시작 날짜 (yyyy-MM-dd, 월요일)
-     * @param endDate   집계 종료 날짜 (yyyy-MM-dd, 일요일)
-     *
-     * curl -X POST "http://localhost:8081/api/jobs/weekly-performance?startDate=2025-01-13&endDate=2025-01-19"
-     */
-    @PostMapping("/weekly-performance")
-    public ResponseEntity<String> runWeeklyPerformance(
-            @RequestParam String startDate,
-            @RequestParam String endDate
-    ) throws Exception {
-
-        JobParameters params = new JobParametersBuilder()
-                .addLong("runId", System.currentTimeMillis())
-                .addString("startDate", startDate)
-                .addString("endDate", endDate)
-                .addString("targetCollection", "weekly_report_snapshot")
-                .toJobParameters();
-
-        log.info("[AnalysisJob] weeklyPerformanceJob 수동 실행 요청 — {} ~ {}", startDate, endDate);
-        jobLauncher.run(weeklyPerformanceJob, params);
-
-        return ResponseEntity.ok("WeeklyPerformance job started (" + startDate + " ~ " + endDate + ")");
-    }
-
-    /**
-     * 월간 전체 상담 성과 집계 Job 실행
-     *
-     * @param startDate 집계 시작 날짜 (yyyy-MM-dd, 1일)
-     * @param endDate   집계 종료 날짜 (yyyy-MM-dd, 말일)
-     *
-     * curl -X POST "http://localhost:8081/api/jobs/monthly-performance?startDate=2025-01-01&endDate=2025-01-31"
-     */
-    @PostMapping("/monthly-performance")
-    public ResponseEntity<String> runMonthlyPerformance(
-            @RequestParam String startDate,
-            @RequestParam String endDate
-    ) throws Exception {
-
-        JobParameters params = new JobParametersBuilder()
-                .addLong("runId", System.currentTimeMillis())
-                .addString("startDate", startDate)
-                .addString("endDate", endDate)
-                .addString("targetCollection", "monthly_report_snapshot")
-                .toJobParameters();
-
-        log.info("[AnalysisJob] monthlyPerformanceJob 수동 실행 요청 — {} ~ {}", startDate, endDate);
-        jobLauncher.run(monthlyPerformanceJob, params);
-
-        return ResponseEntity.ok("MonthlyPerformance job started (" + startDate + " ~ " + endDate + ")");
-    }
-
-
-    /**
-     * 일별 키워드 집계 Job 실행
-     * curl -X POST "http://localhost:8081/api/jobs/daily-keyword"
-     */
-    @PostMapping("/daily-keyword")
-    public ResponseEntity<String> runDailyKeyword() {
+    @Operation(summary = "② 일별 관리자 리포트 배치 (슬롯별 3회)", description = "performance → keyword → customerRisk → hourlyConsult 순서로 실행")
+    @PostMapping("/run-daily-batch")
+    public ResponseEntity<String> runDailyBatch(
+            @Parameter(description = "집계 대상 날짜", example = "2025-01-18") @RequestParam String date,
+            @Parameter(description = "시간대 슬롯. 생략 시 현재 시간 기준", schema = @Schema(allowableValues = {"09-12", "12-15", "15-18"})) @RequestParam(required = false) String slot
+    ) {
         try {
-            JobParameters params = new JobParametersBuilder()
-                .addLong("runId", System.currentTimeMillis())
-                .toJobParameters();
+            JobParametersBuilder builder = new JobParametersBuilder()
+                    .addLong("runId", System.currentTimeMillis())
+                    .addString("startDate", date)
+                    .addString("endDate", date)
+                    .addString("targetCollection", "daily_report_snapshot")
+                    .addString("targetDate", date);
 
-            log.info("[AnalysisJob] dailyKeywordJob 수동 실행 요청");
-            jobLauncher.run(dailyKeywordJob, params);
-            return ResponseEntity.ok("DailyKeyword job started");
+            if (slot != null && !slot.isBlank()) {
+                builder.addString("slot", slot);
+            }
+
+            JobParameters params = builder.toJobParameters();
+
+            log.info("[AnalysisJob] dailyAdminReportJob 수동 실행 요청 — date={}, slot={}", date, slot);
+            jobLauncher.run(dailyAdminReportJob, params);
+
+            return ResponseEntity.ok("DailyAdminReport job started (date=" + date + ", slot=" + slot + ")");
         } catch (Exception e) {
-            log.error("일별 키워드 배치 실행 중 오류 발생: ", e);
+            log.error("일별 관리자 리포트 배치 실행 중 오류 발생: ", e);
             return ResponseEntity.internalServerError().body("배치 실행 실패: " + e.getMessage());
         }
     }
 
-    /**
-     * 주별 관리자 리포트 수동 실행
-     * curl -X GET "http://localhost:8081/api/jobs/run-weekly-batch?startDate=2025-01-08&endDate=2025-01-15"
-     */
+    @Operation(summary = "④ 주별 관리자 리포트 배치", description = "performance → keyword → subscription 순서로 실행")
     @GetMapping("/run-weekly-batch")
     public ResponseEntity<String> runWeeklyBatch(
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate
+            @Parameter(description = "시작일 (월요일)", example = "2025-01-13") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (일요일)", example = "2025-01-19") @RequestParam(required = false) String endDate
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
-                .addLong("time", System.currentTimeMillis());
+                    .addLong("time", System.currentTimeMillis())
+                    .addString("targetCollection", "weekly_report_snapshot");
 
             if (startDate != null && !startDate.isBlank()) {
                 builder.addString("startDate", startDate);
@@ -230,19 +232,16 @@ public class AnalysisJobController {
         }
     }
 
-
-    /**
-     * 월별 관리자 리포트 수동 실행
-     * curl -X GET "http://localhost:8081/api/jobs/run-monthly-batch?startDate=2025-01-01&endDate=2025-01-31"
-     */
+    @Operation(summary = "⑥ 월별 관리자 리포트 배치", description = "performance → keyword → subscription → churnDefense → customerRisk 순서로 실행")
     @GetMapping("/run-monthly-batch")
     public ResponseEntity<String> runMonthlyBatch(
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate
+            @Parameter(description = "시작일 (1일)", example = "2025-01-01") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (말일)", example = "2025-01-31") @RequestParam(required = false) String endDate
     ) {
         try {
             JobParametersBuilder builder = new JobParametersBuilder()
-                .addLong("time", System.currentTimeMillis());
+                    .addLong("time", System.currentTimeMillis())
+                    .addString("targetCollection", "monthly_report_snapshot");
 
             if (startDate != null && !startDate.isBlank()) {
                 builder.addString("startDate", startDate);
@@ -262,71 +261,78 @@ public class AnalysisJobController {
         }
     }
 
+    // ==================== 상담사 리포트 엔드포인트 ====================
 
-    /**
-     * 상담사 일별 리포트 배치 수동 실행 (어제 데이터 집계)
-     * 호출: http://localhost:8081/api/jobs/daily-agent-report
-     */
+    @Operation(summary = "① 일별 상담사 리포트 배치", description = "상담사별 일별 개인 리포트 생성")
     @GetMapping("/daily-agent-report")
-    public String runDailyAgentReportJob() {
+    public String runDailyAgentReportJob(
+            @Parameter(description = "집계 대상 날짜 (생략 시 어제)", example = "2025-01-18") @RequestParam(required = false) String date
+    ) {
         try {
-            JobParameters jobParameters = new JobParametersBuilder()
-                // 동일 파라미터 재실행 방지를 위해 실행 시각만 기록
-                .addString("executionTime", LocalDateTime.now().toString())
-                .toJobParameters();
+            JobParametersBuilder builder = new JobParametersBuilder()
+                .addString("executionTime", LocalDateTime.now().toString());
 
-            jobLauncher.run(dailyAgentReportJob, jobParameters);
+            if (date != null && !date.isBlank()) {
+                builder.addString("targetDate", date);
+            }
 
-            return "Daily Agent Report Batch has been started for yesterday's data.";
+            jobLauncher.run(dailyAgentReportJob, builder.toJobParameters());
+
+            return "Daily Agent Report Batch has been started (date=" + date + ")";
         } catch (Exception e) {
             log.error("Batch Manual Execution Failed", e);
             return "Batch Job Failed: " + e.getMessage();
         }
     }
 
-    /**
-     * 상담사 주별 리포트 배치 수동 실행
-     * 일별 스냅샷(daily_agent_report_snapshot)을 기반으로 지난주 월~일을 집계합니다.
-     * 호출: http://localhost:8081/api/jobs/weekly-agent-report
-     */
+    @Operation(summary = "③ 주별 상담사 리포트 배치", description = "상담사별 주별 개인 리포트 생성 (생략 시 지난주)")
     @GetMapping("/weekly-agent-report")
-    public String runWeeklyAgentReportJob() {
+    public String runWeeklyAgentReportJob(
+            @Parameter(description = "시작일 (월요일)", example = "2025-01-13") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (일요일)", example = "2025-01-19") @RequestParam(required = false) String endDate
+    ) {
         try {
-            JobParameters jobParameters = new JobParametersBuilder()
-                // 동일 파라미터로 인한 실행 거부를 방지하기 위해 현재 시각 추가
+            JobParametersBuilder builder = new JobParametersBuilder()
                 .addString("executionTime", LocalDateTime.now().toString())
-                .addString("jobType", "WEEKLY")
-                .toJobParameters();
+                .addString("jobType", "WEEKLY");
 
-            // 주별 Job 실행
-            jobLauncher.run(weeklyAgentReportJob, jobParameters);
+            if (startDate != null && !startDate.isBlank()) {
+                builder.addString("startDate", startDate);
+            }
+            if (endDate != null && !endDate.isBlank()) {
+                builder.addString("endDate", endDate);
+            }
 
-            return "Weekly Agent Report Batch has been started (Based on last week's Daily Snapshots).";
+            jobLauncher.run(weeklyAgentReportJob, builder.toJobParameters());
+
+            return "Weekly Agent Report Batch has been started (startDate=" + startDate + ", endDate=" + endDate + ")";
         } catch (Exception e) {
             log.error("Weekly Batch Manual Execution Failed", e);
             return "Weekly Batch Job Failed: " + e.getMessage();
         }
     }
 
-
-    /**
-     * 상담사 월별 리포트 배치 수동 실행
-     * 일별 스냅샷(daily_agent_report_snapshot)을 기반으로 지난달 1~31을 집계합니다.
-     * 호출: http://localhost:8081/api/jobs/monthly-agent-report
-     */
+    @Operation(summary = "⑤ 월별 상담사 리포트 배치", description = "상담사별 월별 개인 리포트 생성 (생략 시 지난달)")
     @GetMapping("/monthly-agent-report")
-    public String runMonthlyAgentReportJob() {
+    public String runMonthlyAgentReportJob(
+            @Parameter(description = "시작일 (1일)", example = "2025-01-01") @RequestParam(required = false) String startDate,
+            @Parameter(description = "종료일 (말일)", example = "2025-01-31") @RequestParam(required = false) String endDate
+    ) {
         try {
-            JobParameters jobParameters = new JobParametersBuilder()
-                // 동일 파라미터로 인한 실행 거부를 방지하기 위해 현재 시각 추가
+            JobParametersBuilder builder = new JobParametersBuilder()
                 .addString("executionTime", LocalDateTime.now().toString())
-                .addString("jobType", "MONTHLY")
-                .toJobParameters();
+                .addString("jobType", "MONTHLY");
 
-            // 주별 Job 실행
-            jobLauncher.run(monthlyAgentReportJob, jobParameters);
+            if (startDate != null && !startDate.isBlank()) {
+                builder.addString("startDate", startDate);
+            }
+            if (endDate != null && !endDate.isBlank()) {
+                builder.addString("endDate", endDate);
+            }
 
-            return "Monthly Agent Report Batch has been started (Based on last month's Daily Snapshots).";
+            jobLauncher.run(monthlyAgentReportJob, builder.toJobParameters());
+
+            return "Monthly Agent Report Batch has been started (startDate=" + startDate + ", endDate=" + endDate + ")";
         } catch (Exception e) {
             log.error("Monthly Batch Manual Execution Failed", e);
             return "Monthly Batch Job Failed: " + e.getMessage();

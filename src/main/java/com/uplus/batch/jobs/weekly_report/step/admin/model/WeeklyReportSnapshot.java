@@ -5,6 +5,7 @@ import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -15,6 +16,8 @@ public class WeeklyReportSnapshot {
   private String id;               // Mongo _id
   private LocalDateTime startAt;   // 집계 시작일
   private LocalDateTime endAt;     // 집계 종료일
+  @CreatedDate
+  private LocalDateTime createdAt;
 
   private SubscriptionAnalysis subscriptionAnalysis;
   private Object keywordSummary;  // 키워드 분석 (topKeywords, longTermTopKeywords, byCustomerType)

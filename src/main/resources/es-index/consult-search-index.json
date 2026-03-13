@@ -1,0 +1,180 @@
+{
+  "settings": {
+    "analysis": {
+      "tokenizer": {
+        "consult_tokenizer": {
+          "type": "nori_tokenizer",
+          "decompound_mode": "mixed",
+          "user_dictionary": "analysis/userdict.txt"
+        }
+      },
+      "filter": {
+
+        "consult_pos_filter": {
+          "type": "nori_part_of_speech",
+          "stoptags": [
+            "E","IC","J","MAG","MAJ","MM",
+            "SP","SSC","SSO","SC","SE"
+          ]
+        },
+
+        "consult_stop_filter": {
+          "type": "stop",
+          "stopwords_path": "analysis/stopwords.txt",
+          "ignore_case": true
+        },
+
+        "consult_synonym_index": {
+          "type": "synonym",
+          "synonyms_path": "analysis/synonyms.txt",
+          "lenient": true
+        },
+
+        "consult_synonym_search": {
+          "type": "synonym_graph",
+          "synonyms_path": "analysis/synonyms.txt",
+          "lenient": true
+        }
+
+      },
+
+      "analyzer": {
+
+        "consult_index_analyzer": {
+          "type": "custom",
+          "tokenizer": "consult_tokenizer",
+          "filter": [
+            "lowercase",
+            "consult_pos_filter",
+            "consult_stop_filter",
+            "consult_synonym_index"
+          ]
+        },
+
+        "consult_search_analyzer": {
+          "type": "custom",
+          "tokenizer": "consult_tokenizer",
+          "filter": [
+            "lowercase",
+            "consult_pos_filter",
+            "consult_stop_filter",
+            "consult_synonym_search"
+          ]
+        }
+
+      }
+    }
+  },
+
+  "mappings": {
+    "properties": {
+
+      "consultId": {
+        "type": "long"
+      },
+
+      "allText": {
+        "type": "text",
+        "analyzer": "consult_index_analyzer",
+        "search_analyzer": "consult_search_analyzer"
+      },
+
+      "customerName": {
+        "type": "text",
+        "analyzer": "consult_index_analyzer",
+        "search_analyzer": "consult_search_analyzer",
+        "fields": {
+          "raw": {
+            "type": "keyword"
+          }
+        }
+      },
+
+      "phone": {
+        "type": "keyword"
+      },
+
+      "customerId": {
+        "type": "keyword"
+      },
+
+      "ageGroup": {
+        "type": "keyword"
+      },
+
+      "grade": {
+        "type": "keyword"
+      },
+
+      "gender": {
+        "type": "keyword"
+      },
+
+      "agentId": {
+        "type": "keyword"
+      },
+
+      "agentName": {
+        "type": "keyword"
+      },
+
+      "categoryCode": {
+        "type": "keyword"
+      },
+
+      "categoryLarge": {
+        "type": "keyword"
+      },
+
+      "categoryMedium": {
+        "type": "keyword"
+      },
+
+      "categorySmall": {
+        "type": "keyword"
+      },
+
+      "channel": {
+        "type": "keyword"
+      },
+
+      "riskFlags": {
+        "type": "object",
+        "properties": {
+          "riskType":  { "type": "keyword" },
+          "riskLevel": { "type": "keyword" }
+        }
+      },
+
+      "intent": {
+        "type": "boolean"
+      },
+
+      "defenseAttempted": {
+        "type": "boolean"
+      },
+
+      "defenseSuccess": {
+        "type": "boolean"
+      },
+
+      "changeTypes": {
+        "type": "keyword"
+      },
+
+      "products": {
+        "type": "keyword"
+      },
+
+      "durationSec": {
+        "type": "integer"
+      },
+
+      "consultedAt": {
+        "type": "date",
+        "format": "yyyy-MM-dd'T'HH:mm:ss"
+      }
+
+    }
+  }
+}

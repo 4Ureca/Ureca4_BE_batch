@@ -4,11 +4,13 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.indices.AnalyzeRequest;
 import com.uplus.batch.domain.summary.values.ExtractKeywords;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KeywordExtractionService {
@@ -33,7 +35,6 @@ public class KeywordExtractionService {
             .distinct()
             .collect(Collectors.toList());
 
-    // 키워드 사전 필터 적용
     return ExtractKeywords.filter(tokens);
   }
 }

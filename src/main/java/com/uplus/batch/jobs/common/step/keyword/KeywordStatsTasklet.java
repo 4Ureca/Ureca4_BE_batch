@@ -97,11 +97,10 @@ public class KeywordStatsTasklet implements Tasklet {
 
     /**
      * daily_report_snapshot에서 기간 내 문서 조회
-     * KeywordRankTasklet은 'date' 필드(LocalDate)를 사용하므로 date 기준으로 조회
+     * KeywordRankTasklet은 'startAt' 필드 기준으로 upsert하므로 startAt 기준으로 조회
      */
     private List<Document> queryDailySnapshots(LocalDate start, LocalDate end) {
-        // KeywordRankTasklet이 저장한 date 필드(LocalDate) 기준 조회
-        Query query = new Query(Criteria.where("date").gte(start).lte(end));
+        Query query = new Query(Criteria.where("startAt").gte(start).lte(end));
         return mongoTemplate.find(query, Document.class, "daily_report_snapshot");
     }
 
@@ -112,7 +111,9 @@ public class KeywordStatsTasklet implements Tasklet {
         Map<String, Long> totalCounts = new HashMap<>();
 
         for (Document snapshot : snapshots) {
-            List<Document> topKeywords = snapshot.getList("topKeywords", Document.class);
+            Document keywordSummary = (Document) snapshot.get("keywordSummary");
+            if (keywordSummary == null) continue;
+            List<Document> topKeywords = keywordSummary.getList("topKeywords", Document.class);
             if (topKeywords == null) continue;
 
             for (Document kw : topKeywords) {
@@ -173,7 +174,9 @@ public class KeywordStatsTasklet implements Tasklet {
         int totalDays = snapshots.size();
 
         for (Document snapshot : snapshots) {
-            List<Document> topKeywords = snapshot.getList("topKeywords", Document.class);
+            Document keywordSummary = (Document) snapshot.get("keywordSummary");
+            if (keywordSummary == null) continue;
+            List<Document> topKeywords = keywordSummary.getList("topKeywords", Document.class);
             if (topKeywords == null) continue;
 
             // 일별 TOP 10 추출
@@ -221,25 +224,27 @@ public class KeywordStatsTasklet implements Tasklet {
 
     /**
      * 고객 유형별(등급별) 키워드 합산
-     * daily_report_snapshot의 byGradeCode 필드를 읽어서 합산
+     * daily_report_snapshot의 keywordSummary.byCustomerType 필드를 읽어서 합산
      */
     private List<KeywordStatsResult.CustomerTypeKeyword> buildByCustomerType(List<Document> snapshots) {
-        // gradeCode → keyword → count
-        Map<String, Map<String, Long>> gradeKeywordCounts = new HashMap<>();
+        // customerType → keyword → count
+        Map<String, Map<String, Long>> customerTypeKeywordCounts = new HashMap<>();
 
         for (Document snapshot : snapshots) {
-            List<Document> byGradeCode = snapshot.getList("byGradeCode", Document.class);
-            if (byGradeCode == null) continue;
+            Document keywordSummary = (Document) snapshot.get("keywordSummary");
+            if (keywordSummary == null) continue;
+            List<Document> byCustomerType = keywordSummary.getList("byCustomerType", Document.class);
+            if (byCustomerType == null) continue;
 
-            for (Document grade : byGradeCode) {
-                String gradeCode = grade.getString("gradeCode");
-                if (gradeCode == null) continue;
+            for (Document ct : byCustomerType) {
+                String customerType = ct.getString("customerType");
+                if (customerType == null) continue;
 
-                List<Document> keywords = grade.getList("keywords", Document.class);
+                List<Document> keywords = ct.getList("keywords", Document.class);
                 if (keywords == null) continue;
 
-                Map<String, Long> keywordMap = gradeKeywordCounts
-                        .computeIfAbsent(gradeCode, k -> new HashMap<>());
+                Map<String, Long> keywordMap = customerTypeKeywordCounts
+                        .computeIfAbsent(customerType, k -> new HashMap<>());
 
                 for (Document kw : keywords) {
                     String keyword = kw.getString("keyword");
@@ -251,18 +256,21 @@ public class KeywordStatsTasklet implements Tasklet {
             }
         }
 
-        // 등급별 TOP 5 키워드명 추출
-        return gradeKeywordCounts.entrySet().stream()
+        // 유형별 TOP 5 키워드+건수 추출
+        return customerTypeKeywordCounts.entrySet().stream()
                 .map(entry -> {
-                    List<String> topKeywordNames = entry.getValue().entrySet().stream()
+                    List<KeywordStatsResult.CustomerKeywordCount> topKeywords = entry.getValue().entrySet().stream()
                             .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                             .limit(GRADE_KEYWORD_SIZE)
-                            .map(Map.Entry::getKey)
+                            .map(e -> KeywordStatsResult.CustomerKeywordCount.builder()
+                                    .keyword(e.getKey())
+                                    .count(e.getValue())
+                                    .build())
                             .toList();
 
                     return KeywordStatsResult.CustomerTypeKeyword.builder()
                             .customerType(entry.getKey())
-                            .keywords(topKeywordNames)
+                            .keywords(topKeywords)
                             .build();
                 })
                 .toList();
@@ -284,7 +292,10 @@ public class KeywordStatsTasklet implements Tasklet {
 
         log.info("===== 고객 유형별 키워드 =====");
         byCustomerType.forEach(ct ->
-                log.info("  {} → {}", ct.getCustomerType(), ct.getKeywords()));
+                log.info("  {} → {}", ct.getCustomerType(),
+                        ct.getKeywords().stream()
+                                .map(k -> k.getKeyword() + "(" + k.getCount() + ")")
+                                .toList()));
     }
 
     /**
@@ -319,9 +330,15 @@ public class KeywordStatsTasklet implements Tasklet {
 
         // byCustomerType를 Document 리스트로 변환
         List<Document> customerTypeDocs = byCustomerType.stream()
-                .map(ct -> new Document()
-                        .append("customerType", ct.getCustomerType())
-                        .append("keywords", ct.getKeywords()))
+                .map(ct -> {
+                    List<Document> kwDocs = ct.getKeywords().stream()
+                            .map(kw -> new Document("keyword", kw.getKeyword())
+                                    .append("count", kw.getCount()))
+                            .toList();
+                    return new Document()
+                            .append("customerType", ct.getCustomerType())
+                            .append("keywords", kwDocs);
+                })
                 .toList();
 
         Document keywordSummary = new Document()

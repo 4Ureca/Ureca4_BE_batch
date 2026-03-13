@@ -11,9 +11,11 @@ import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -32,18 +34,23 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
     // mysql 에서 상품 정보 전부 가져옴
     Map<String, String> productMasterMap = loadProductMaster();
 
-    // 1. 집계 기간 설정 (데이터가 있는 2025년 1월로 테스트)
-    LocalDateTime startAt = LocalDateTime.of(2025, 1, 1, 0, 0, 0);
-    LocalDateTime endAt = LocalDateTime.of(2025, 1, 31, 23, 59, 59);
+    // 1. 집계 기간 설정 — Job 파라미터 우선, 없으면 지난달 1일 ~ 말일
+    Map<String, Object> jobParams = chunkContext.getStepContext().getJobParameters();
+    String startDateStr = (String) jobParams.get("startDate");
+    String endDateStr = (String) jobParams.get("endDate");
 
-    /* [월별 운영용] 배치가 실행되는 시점 기준 "지난달 1일 ~ 말일" 계산
-    LocalDate now = LocalDate.now();
-    LocalDate lastMonth = now.minusMonths(1);
+    LocalDateTime startAt;
+    LocalDateTime endAt;
 
-    LocalDateTime startAt = lastMonth.withDayOfMonth(1).atStartOfDay(); // 지난달 1일 00:00:00
-    LocalDateTime endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth())
-        .atTime(23, 59, 59); // 지난달 말일 23:59:59
-    */
+    if (startDateStr != null && endDateStr != null) {
+      startAt = LocalDate.parse(startDateStr).atStartOfDay();
+      endAt = LocalDate.parse(endDateStr).atTime(23, 59, 59);
+    } else {
+      LocalDate now = LocalDate.now();
+      LocalDate lastMonth = now.minusMonths(1);
+      startAt = lastMonth.withDayOfMonth(1).atStartOfDay();
+      endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()).atTime(23, 59, 59);
+    }
 
 
     log.info("[MonthlyStats] 월별 리포트 집계 시작: {} ~ {}", startAt, endAt);
@@ -81,10 +88,9 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
 
           // 연령대별 상품 카운트 수행
           for (String id : subIds) {
-            String productName = productMasterMap.getOrDefault(id, id);
             ageGroupPrefs
                 .computeIfAbsent(ageGroup, k -> new HashMap<>())
-                .merge(productName, 1L, Long::sum);
+                .merge(id, 1L, Long::sum);
           }
         }
 
@@ -98,7 +104,6 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
     MonthlyReportSnapshot snapshot = new MonthlyReportSnapshot();
     snapshot.setStartAt(startAt);
     snapshot.setEndAt(endAt);
-
     MonthlyReportSnapshot.SubscriptionAnalysis analysis = new MonthlyReportSnapshot.SubscriptionAnalysis();
 
     // Map 데이터를 명세서 구조(List<ProductCount>)로 변환
@@ -110,7 +115,7 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
     List<MonthlyReportSnapshot.ByAgeGroup> agePrefsList = ageGroupPrefs.entrySet().stream()
         .map(entry -> {
           List<MonthlyReportSnapshot.ProductCount> top3 = entry.getValue().entrySet().stream()
-              .map(e -> new MonthlyReportSnapshot.ProductCount(null, e.getKey(), e.getValue()))
+              .map(e -> new MonthlyReportSnapshot.ProductCount(e.getKey(), productMasterMap.getOrDefault(e.getKey(), e.getKey()), e.getValue()))
               .sorted(Comparator.comparingLong(MonthlyReportSnapshot.ProductCount::getCount).reversed())
               .limit(3)
               .collect(Collectors.toList());
@@ -129,8 +134,20 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
         analysis.getNewSubscriptions().size(),
         analysis.getCanceledSubscriptions().size());
 
-    // 실제 저장을 위해 주석 해제 상태로 둡니다.
-    mongoTemplate.save(snapshot, "monthly_report_snapshot");
+    // MongoDB upsert
+    Query upsertQuery = new Query(
+        Criteria.where("startAt").is(startAt)
+            .and("endAt").is(endAt)
+    );
+
+    Update update = new Update()
+        .set("subscriptionAnalysis", analysis)
+        .setOnInsert("startAt", startAt)
+        .setOnInsert("endAt", endAt)
+        .setOnInsert("createdAt", LocalDateTime.now());
+
+    mongoTemplate.upsert(upsertQuery, update, "monthly_report_snapshot");
+
     log.info("[MonthlyStats] MongoDB 저장 완료 (ID: {})", snapshot.getId());
 
     return RepeatStatus.FINISHED;

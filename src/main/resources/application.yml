@@ -10,7 +10,6 @@ spring:
     username: crm
     password: crm
 
-
   data:
     mongodb:
       uri: mongodb://localhost:27018/crm
