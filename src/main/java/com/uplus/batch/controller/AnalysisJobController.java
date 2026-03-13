@@ -173,30 +173,36 @@ public class AnalysisJobController {
 
     // ==================== 관리자 리포트 엔드포인트 ====================
 
-    @Operation(summary = "② 일별 관리자 리포트 배치 (슬롯별 3회)", description = "performance → keyword → customerRisk → hourlyConsult 순서로 실행")
+    private static final String[] ALL_SLOTS = {"09-12", "12-15", "15-18"};
+
+    @Operation(summary = "② 일별 관리자 리포트 배치 (슬롯별 3회)", description = "performance → keyword → customerRisk → hourlyConsult 순서로 실행. 슬롯 미지정 시 3개 전체 실행")
     @PostMapping("/run-daily-batch")
     public ResponseEntity<String> runDailyBatch(
             @Parameter(description = "집계 대상 날짜", example = "2025-01-18") @RequestParam String date,
-            @Parameter(description = "시간대 슬롯. 생략 시 현재 시간 기준", schema = @Schema(allowableValues = {"09-12", "12-15", "15-18"})) @RequestParam(required = false) String slot
+            @Parameter(description = "시간대 슬롯. 생략 시 3개 전체 실행", schema = @Schema(allowableValues = {"09-12", "12-15", "15-18"})) @RequestParam(required = false) String slot
     ) {
         try {
-            JobParametersBuilder builder = new JobParametersBuilder()
-                    .addLong("runId", System.currentTimeMillis())
-                    .addString("startDate", date)
-                    .addString("endDate", date)
-                    .addString("targetCollection", "daily_report_snapshot")
-                    .addString("targetDate", date);
+            String[] slotsToRun = (slot != null && !slot.isBlank())
+                    ? new String[]{slot}
+                    : ALL_SLOTS;
 
-            if (slot != null && !slot.isBlank()) {
-                builder.addString("slot", slot);
+            for (String s : slotsToRun) {
+                JobParameters params = new JobParametersBuilder()
+                        .addLong("runId", System.currentTimeMillis())
+                        .addString("startDate", date)
+                        .addString("endDate", date)
+                        .addString("targetCollection", "daily_report_snapshot")
+                        .addString("targetDate", date)
+                        .addString("slot", s)
+                        .toJobParameters();
+
+                log.info("[AnalysisJob] dailyAdminReportJob 수동 실행 — date={}, slot={}", date, s);
+                jobLauncher.run(dailyAdminReportJob, params);
+                log.info("[AnalysisJob] dailyAdminReportJob 완료 — date={}, slot={}", date, s);
             }
 
-            JobParameters params = builder.toJobParameters();
-
-            log.info("[AnalysisJob] dailyAdminReportJob 수동 실행 요청 — date={}, slot={}", date, slot);
-            jobLauncher.run(dailyAdminReportJob, params);
-
-            return ResponseEntity.ok("DailyAdminReport job started (date=" + date + ", slot=" + slot + ")");
+            String ranSlots = String.join(", ", slotsToRun);
+            return ResponseEntity.ok("DailyAdminReport job completed (date=" + date + ", slots=[" + ranSlots + "])");
         } catch (Exception e) {
             log.error("일별 관리자 리포트 배치 실행 중 오류 발생: ", e);
             return ResponseEntity.internalServerError().body("배치 실행 실패: " + e.getMessage());

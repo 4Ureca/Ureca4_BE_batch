@@ -40,65 +40,110 @@ public class SchedulerTestController {
   private final TaskScheduler taskScheduler;
 
   @Operation(summary = "일별 스케줄러 실행",
-      description = "전날(어제) 기준. reserveAt 미입력 시 즉시 실행, 입력 시 예약 실행")
+      description = "date 미입력 시 DB 내 모든 요약문 날짜 대상 전체 실행. date 입력 시 해당 날짜만 실행. count로 실행 건수 제한 가능")
   @PostMapping("/daily")
   public ResponseEntity<String> triggerDaily(
+      @Parameter(description = "집계 대상 날짜 (예: 2026-03-12). 미입력 시 전체 실행")
+      @RequestParam(required = false) String date,
+      @Parameter(description = "전체 실행 시 앞에서 N건만 실행 (예: 10). 미입력 시 전체")
+      @RequestParam(required = false) Integer count,
       @Parameter(description = "예약 시간 (예: 2026-03-12T14:30:00). 미입력 시 즉시 실행")
       @RequestParam(required = false) String reserveAt) {
 
     if (reserveAt == null || reserveAt.isBlank()) {
-      dailyReportScheduler.runDailyBatch();
-      return ResponseEntity.ok("일별 스케줄러 즉시 실행 완료");
+      if (date != null && !date.isBlank()) {
+        dailyReportScheduler.runDailyBatch(date);
+      } else {
+        dailyReportScheduler.runAllDates(count);
+      }
+      String label = date != null ? date : (count != null ? "ALL(limit=" + count + ")" : "ALL");
+      return ResponseEntity.ok("일별 스케줄러 즉시 실행 완료 (date=" + label + ")");
     }
 
     LocalDateTime scheduled = LocalDateTime.parse(reserveAt);
     taskScheduler.schedule(
-        dailyReportScheduler::runDailyBatch,
+        () -> {
+          if (date != null && !date.isBlank()) {
+            dailyReportScheduler.runDailyBatch(date);
+          } else {
+            dailyReportScheduler.runAllDates(count);
+          }
+        },
         scheduled.atZone(ZoneId.of("Asia/Seoul")).toInstant());
 
-    log.info("[SchedulerTest] 일별 배치 예약 — {}", reserveAt);
+    log.info("[SchedulerTest] 일별 배치 예약 — date={}, count={}, reserveAt={}", date, count, reserveAt);
     return ResponseEntity.ok("일별 스케줄러 예약 완료 → " + formatTime(scheduled));
   }
 
   @Operation(summary = "주별 스케줄러 실행",
-      description = "지난주(월~일) 기준. reserveAt 미입력 시 즉시 실행, 입력 시 예약 실행")
+      description = "date 미입력 시 DB 내 모든 요약문 날짜 대상 전체 실행. date 입력 시 해당 주만 실행. count로 실행 건수 제한 가능")
   @PostMapping("/weekly")
   public ResponseEntity<String> triggerWeekly(
+      @Parameter(description = "집계 기준 날짜 (해당 주 계산용, 예: 2026-03-12). 미입력 시 전체 실행")
+      @RequestParam(required = false) String date,
+      @Parameter(description = "전체 실행 시 앞에서 N건(주)만 실행 (예: 5). 미입력 시 전체")
+      @RequestParam(required = false) Integer count,
       @Parameter(description = "예약 시간 (예: 2026-03-12T14:30:00). 미입력 시 즉시 실행")
       @RequestParam(required = false) String reserveAt) {
 
     if (reserveAt == null || reserveAt.isBlank()) {
-      weeklyReportScheduler.runWeeklyBatch();
-      return ResponseEntity.ok("주별 스케줄러 즉시 실행 완료");
+      if (date != null && !date.isBlank()) {
+        weeklyReportScheduler.runWeeklyBatch(date);
+      } else {
+        weeklyReportScheduler.runAllDates(count);
+      }
+      String label = date != null ? date : (count != null ? "ALL(limit=" + count + ")" : "ALL");
+      return ResponseEntity.ok("주별 스케줄러 즉시 실행 완료 (date=" + label + ")");
     }
 
     LocalDateTime scheduled = LocalDateTime.parse(reserveAt);
     taskScheduler.schedule(
-        weeklyReportScheduler::runWeeklyBatch,
+        () -> {
+          if (date != null && !date.isBlank()) {
+            weeklyReportScheduler.runWeeklyBatch(date);
+          } else {
+            weeklyReportScheduler.runAllDates(count);
+          }
+        },
         scheduled.atZone(ZoneId.of("Asia/Seoul")).toInstant());
 
-    log.info("[SchedulerTest] 주별 배치 예약 — {}", reserveAt);
+    log.info("[SchedulerTest] 주별 배치 예약 — date={}, count={}, reserveAt={}", date, count, reserveAt);
     return ResponseEntity.ok("주별 스케줄러 예약 완료 → " + formatTime(scheduled));
   }
 
   @Operation(summary = "월별 스케줄러 실행",
-      description = "지난달(1일~말일) 기준. reserveAt 미입력 시 즉시 실행, 입력 시 예약 실행")
+      description = "date 미입력 시 DB 내 모든 요약문 날짜 대상 전체 실행. date 입력 시 해당 월만 실행. count로 실행 건수 제한 가능")
   @PostMapping("/monthly")
   public ResponseEntity<String> triggerMonthly(
+      @Parameter(description = "집계 기준 날짜 (해당 월 계산용, 예: 2026-03-12). 미입력 시 전체 실행")
+      @RequestParam(required = false) String date,
+      @Parameter(description = "전체 실행 시 앞에서 N건(월)만 실행 (예: 3). 미입력 시 전체")
+      @RequestParam(required = false) Integer count,
       @Parameter(description = "예약 시간 (예: 2026-03-12T14:30:00). 미입력 시 즉시 실행")
       @RequestParam(required = false) String reserveAt) {
 
     if (reserveAt == null || reserveAt.isBlank()) {
-      monthlyReportScheduler.runMonthlyBatch();
-      return ResponseEntity.ok("월별 스케줄러 즉시 실행 완료");
+      if (date != null && !date.isBlank()) {
+        monthlyReportScheduler.runMonthlyBatch(date);
+      } else {
+        monthlyReportScheduler.runAllDates(count);
+      }
+      String label = date != null ? date : (count != null ? "ALL(limit=" + count + ")" : "ALL");
+      return ResponseEntity.ok("월별 스케줄러 즉시 실행 완료 (date=" + label + ")");
     }
 
     LocalDateTime scheduled = LocalDateTime.parse(reserveAt);
     taskScheduler.schedule(
-        monthlyReportScheduler::runMonthlyBatch,
+        () -> {
+          if (date != null && !date.isBlank()) {
+            monthlyReportScheduler.runMonthlyBatch(date);
+          } else {
+            monthlyReportScheduler.runAllDates(count);
+          }
+        },
         scheduled.atZone(ZoneId.of("Asia/Seoul")).toInstant());
 
-    log.info("[SchedulerTest] 월별 배치 예약 — {}", reserveAt);
+    log.info("[SchedulerTest] 월별 배치 예약 — date={}, count={}, reserveAt={}", date, count, reserveAt);
     return ResponseEntity.ok("월별 스케줄러 예약 완료 → " + formatTime(scheduled));
   }
 

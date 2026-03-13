@@ -124,11 +124,6 @@ public class HourlyConsultTasklet implements Tasklet {
         List<HourlyConsultResult.CategoryBreakdown> categoryBreakdown = buildCategoryBreakdown(
                 categoryDocs, slotTotalCount);
 
-        log.info("[HourlyConsult] 슬롯 {} — 총 {}건, 평균 {}분, 카테고리 {}종",
-                targetSlot, slotTotalCount,
-                Math.round(slotAvgDurationMin * 10.0) / 10.0,
-                categoryBreakdown.size());
-
         // 2) [변경] 키워드 집계: MySQL 원문 → Nori analyze (유진님 방식)
         Map<String, Long> currentKeywords = aggregateKeywordsFromRawText(slotStart, slotEnd);
 
@@ -137,12 +132,6 @@ public class HourlyConsultTasklet implements Tasklet {
                 targetDate.minusDays(1), targetSlot);
         HourlyConsultResult.KeywordAnalysis keywordAnalysis = buildKeywordAnalysis(
                 currentKeywords, previousKeywords);
-
-        log.info("[HourlyConsult] 슬롯 {} — 키워드 {}개, 신규 {}개",
-                targetSlot,
-                keywordAnalysis.getTopKeywords().size(),
-                keywordAnalysis.getNewKeywords().size());
-
 
         // 5) 슬롯 결과 조립
         HourlyConsultResult.TimeSlotResult slotResult = HourlyConsultResult.TimeSlotResult.builder()
@@ -177,9 +166,7 @@ public class HourlyConsultTasklet implements Tasklet {
         // 8) daily_report_snapshot upsert
         upsertSnapshot(dayStart, dayEnd, result);
 
-        log.info("[HourlyConsult] {} 슬롯 {} 집계 완료 — 전체 {}건",
-                targetDate, targetSlot, totalCount);
-
+        log.info("[HourlyConsult] {} 슬롯 {} 집계 완료", targetDate, targetSlot);
         return RepeatStatus.FINISHED;
     }
 

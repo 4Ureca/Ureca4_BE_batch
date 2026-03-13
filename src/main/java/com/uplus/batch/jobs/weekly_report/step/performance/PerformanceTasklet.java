@@ -92,7 +92,6 @@ public class PerformanceTasklet implements Tasklet {
         Document summaryDoc = summaryResults.getUniqueMappedResult();
 
         if (summaryDoc == null) {
-            log.info("[Performance] {} ~ {} 데이터 없음. 스킵.", startDate, endDate);
             return RepeatStatus.FINISHED;
         }
 
@@ -150,22 +149,8 @@ public class PerformanceTasklet implements Tasklet {
             ).reversed());
         }
 
-        log.info("[Performance] 전체 — {}건, 상담사 {}명, 평균 {}건/인, 평균소요 {}분, 만족도 {}",
-                totalCount, agentCount, avgConsultCountPerAgent,
-                Math.round(avgDurationSec / 60.0 * 10.0) / 10.0,
-                Math.round(avgSatisfiedScore * 10.0) / 10.0);
-
-        double avgQualityScore = agentPerformance.stream()
-                .map(PerformanceResult.AgentPerformance::getQualityScore)
-                .filter(q -> q != null)
-                .mapToDouble(Double::doubleValue)
-                .average().orElse(0.0);
-        log.info("[Performance] 상담사 {}명 집계 완료, 평균 응대품질 {}",
-                agentPerformance.size(), Math.round(avgQualityScore * 10.0) / 10.0);
-
         // 3) 카테고리별 빈도 집계
         List<Document> categoryRanking = aggregateCategory(startAt, endAt);
-        log.info("[Performance] 카테고리 {}종 집계", categoryRanking.size());
 
         // 4) 결과 빌드
         PerformanceResult result = PerformanceResult.builder()
@@ -179,7 +164,7 @@ public class PerformanceTasklet implements Tasklet {
         // 5) 스냅샷 upsert
         upsertSnapshot(startAt, endAt, result, categoryRanking);
 
-        log.info("[Performance] {} ~ {} → {} upsert 완료", startDate, endDate, targetCollection);
+        log.info("[Performance] {} ~ {} 집계 완료 → {}", startDate, endDate, targetCollection);
         return RepeatStatus.FINISHED;
     }
 
@@ -279,7 +264,6 @@ public class PerformanceTasklet implements Tasklet {
                     scoreMap.put(agentId, Math.round(totalScore * 10.0) / 10.0);
                 }
             }
-            log.info("[Performance] 응대 품질 점수 {}명 로드 ({})", scoreMap.size(), agentCollection);
         } catch (Exception e) {
             log.warn("[Performance] 응대 품질 점수 로드 실패: {}", e.getMessage());
         }

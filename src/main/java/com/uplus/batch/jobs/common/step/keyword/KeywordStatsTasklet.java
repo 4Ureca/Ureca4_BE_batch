@@ -48,14 +48,12 @@ public class KeywordStatsTasklet implements Tasklet {
             // 기본값: 테스트용 하드코딩 (2025-01-08 ~ 2025-01-15)
             startDate = LocalDate.of(2025, 1, 8);
             endDate = LocalDate.of(2025, 1, 15);
-            log.info("startDate/endDate 파라미터 미지정 → 기본값 사용: {} ~ {}", startDate, endDate);
         }
 
-        log.info("KeywordStats 집계 시작 - period: {} ~ {}, collection: {}", startDate, endDate, targetCollectionName);
+        log.info("[KeywordStats] {} ~ {} 집계 시작 → {}", startDate, endDate, targetCollectionName);
 
         // 1. 현재 기간 일별 스냅샷 조회
         List<Document> currentSnapshots = queryDailySnapshots(startDate, endDate);
-        log.info("현재 기간 daily_report_snapshot {}건 조회", currentSnapshots.size());
 
         if (currentSnapshots.isEmpty()) {
             log.warn("기간 내 daily_report_snapshot이 없습니다. 키워드 집계를 건너뜁니다.");
@@ -67,7 +65,6 @@ public class KeywordStatsTasklet implements Tasklet {
         LocalDate prevStartDate = startDate.minusDays(periodDays);
         LocalDate prevEndDate = startDate.minusDays(1);
         List<Document> prevSnapshots = queryDailySnapshots(prevStartDate, prevEndDate);
-        log.info("이전 기간 daily_report_snapshot {}건 조회 ({} ~ {})", prevSnapshots.size(), prevStartDate, prevEndDate);
 
         // 3. topKeywords 합산 + 증감율 계산
         Map<String, Long> currentKeywordCounts = aggregateKeywordCounts(currentSnapshots);
@@ -89,9 +86,7 @@ public class KeywordStatsTasklet implements Tasklet {
         // 7. 스냅샷에 keywordSummary upsert
         saveKeywordSummary(startDate, endDate, topKeywords, longTermKeywords, byCustomerType);
 
-        log.info("KeywordStats 집계 완료 - topKeywords: {}건, longTermTop: {}건, customerTypes: {}건",
-                topKeywords.size(), longTermKeywords.size(), byCustomerType.size());
-
+        log.info("[KeywordStats] {} ~ {} 집계 완료 → {}", startDate, endDate, targetCollectionName);
         return RepeatStatus.FINISHED;
     }
 
@@ -279,23 +274,7 @@ public class KeywordStatsTasklet implements Tasklet {
     private void logResults(List<KeywordStatsResult.TopKeyword> topKeywords,
                             List<KeywordStatsResult.LongTermKeyword> longTermKeywords,
                             List<KeywordStatsResult.CustomerTypeKeyword> byCustomerType) {
-
-        log.info("===== 전체 키워드 TOP{} =====", TOP_KEYWORD_SIZE);
-        topKeywords.stream().limit(10).forEach(k ->
-                log.info("  #{} {} ({}건, {}%)", k.getRank(), k.getKeyword(), k.getCount(),
-                        k.getChangeRate() >= 0 ? "+" + k.getChangeRate() : k.getChangeRate()));
-
-        log.info("===== 장기 상위 유지 키워드 ({}일 이상) =====", LONG_TERM_THRESHOLD_DAYS);
-        longTermKeywords.forEach(k ->
-                log.info("  #{} {} ({}건, {}/{}일 등장)", k.getRank(), k.getKeyword(),
-                        k.getCount(), k.getAppearanceDays(), k.getTotalDays()));
-
-        log.info("===== 고객 유형별 키워드 =====");
-        byCustomerType.forEach(ct ->
-                log.info("  {} → {}", ct.getCustomerType(),
-                        ct.getKeywords().stream()
-                                .map(k -> k.getKeyword() + "(" + k.getCount() + ")")
-                                .toList()));
+        // 상세 로그 생략
     }
 
     /**
@@ -356,6 +335,5 @@ public class KeywordStatsTasklet implements Tasklet {
 
         mongoTemplate.upsert(query, update, targetCollectionName);
 
-        log.info("{} 컬렉션에 keywordSummary 저장 완료 (startAt={})", targetCollectionName, startAt);
     }
 }

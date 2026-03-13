@@ -59,17 +59,14 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
             endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()).atTime(23, 59, 59);
         }
 
-        log.info("[ChurnDefense] 해지방어 패턴 분석 시작: {} ~ {}", startAt, endAt);
+        log.info("[ChurnDefense] {} ~ {} 집계 시작", startAt, endAt);
 
         // 2. consultation_summary에서 해지 의향(cancellation.intent=true) 건 조회
         Query query = new Query(Criteria.where("consultedAt").gte(startAt).lte(endAt)
                 .and("cancellation.intent").is(true));
         List<Document> intentDocs = mongoTemplate.find(query, Document.class, "consultation_summary");
 
-        log.info("[ChurnDefense] 해지 의향 상담 건수: {}건", intentDocs.size());
-
         if (intentDocs.isEmpty()) {
-            log.info("[ChurnDefense] 해지 의향 데이터 없음 — 스킵");
             return RepeatStatus.FINISHED;
         }
 
@@ -214,11 +211,6 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
                 .collect(Collectors.toList());
         churnDefense.put("byAction", byAction);
 
-        log.info("[ChurnDefense] 집계 완료 — 시도: {}건, 성공: {}건, 성공률: {}%, 평균소요: {}초",
-                totalAttempts, successCount, successRate, avgDurationSec);
-        log.info("[ChurnDefense] 불만사유 {}종, 고객유형 {}종, 액션 {}종",
-                complaintReasons.size(), byCustomerType.size(), byAction.size());
-
         // 6. monthly_report_snapshot에 upsert
         Query upsertQuery = new Query(
                 Criteria.where("startAt").is(startAt)
@@ -231,8 +223,8 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
                 .setOnInsert("endAt", endAt);
 
         mongoTemplate.upsert(upsertQuery, update, "monthly_report_snapshot");
-        log.info("[ChurnDefense] monthly_report_snapshot 저장 완료");
 
+        log.info("[ChurnDefense] {} ~ {} 집계 완료", startAt, endAt);
         return RepeatStatus.FINISHED;
     }
 
