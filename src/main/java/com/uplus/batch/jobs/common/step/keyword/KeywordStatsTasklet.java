@@ -23,7 +23,7 @@ public class KeywordStatsTasklet implements Tasklet {
 
     private static final int TOP_KEYWORD_SIZE = 20;
     private static final int GRADE_KEYWORD_SIZE = 5;
-    private static final int LONG_TERM_THRESHOLD_DAYS = 14;
+    private static final int LONG_TERM_THRESHOLD_DAYS = 4;
     private static final int LONG_TERM_LOOKUP_DAYS = 28;
     private static final int DAILY_TOP_N = 10;
 

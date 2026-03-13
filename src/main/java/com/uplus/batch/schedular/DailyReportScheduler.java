@@ -78,7 +78,11 @@ public class DailyReportScheduler {
   public void runAllDates(Integer count) {
     Aggregation agg = Aggregation.newAggregation(
         Aggregation.project()
-            .andExpression("dateToString('%Y-%m-%d', consultedAt)").as("dateStr"),
+            .and(context -> new Document("$dateToString",
+                new Document("format", "%Y-%m-%d")
+                    .append("date", "$consultedAt")
+                    .append("timezone", "+09:00")))
+            .as("dateStr"),
         Aggregation.group("dateStr"),
         Aggregation.sort(org.springframework.data.domain.Sort.Direction.ASC, "_id")
     );

@@ -108,7 +108,7 @@ public class MonthlyCustomerRiskTasklet implements Tasklet {
                                 .and("riskFlags.0").exists(true)
                 ),
                 Aggregation.unwind("riskFlags"),
-                Aggregation.group("riskFlags").count().as("count"),
+                Aggregation.group("riskFlags.riskType").count().as("count"),
                 Aggregation.sort(Sort.Direction.DESC, "count")
         );
 
