@@ -10,7 +10,8 @@ spring:
 
     redis:
       cluster:
-        nodes: ${REDIS_URI}:6379
+        nodes:
+          - ${REDIS_URI}:6379
 
   elasticsearch:
     uris: ${ES_URI}
