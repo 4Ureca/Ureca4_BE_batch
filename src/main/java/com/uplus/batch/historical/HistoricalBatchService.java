@@ -1,5 +1,6 @@
 package com.uplus.batch.historical;
 
+import com.uplus.batch.synthetic.OutboundConsultationFactory;
 import com.uplus.batch.synthetic.SyntheticConsultationFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,17 +16,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <h3>역할 분리</h3>
  * <pre>
  * [이 배치]
- *   consultation_results + raw_texts + 연관 테이블 생성 (created_at = targetDate)
- *   result_event_status  → REQUESTED
- *   summary_event_status → requested
+ *   인바운드: consultation_results + raw_texts + 연관 테이블 생성 (created_at = targetDate)
+ *             result_event_status  → REQUESTED
+ *             summary_event_status → requested
+ *   아웃바운드: consultation_results + raw_texts + retention_analysis 더미 데이터 생성
+ *              (AI 추출·요약 트리거 없음 — retention_analysis에 더미 데이터 직접 삽입)
  *
  * [ExtractionScheduler — 별도 배치]
- *   result_event_status=REQUESTED 감지
+ *   result_event_status=REQUESTED 감지 (인바운드 분)
  *   → Gemini API 호출 → retention_analysis 저장
  *   → result_event_status=COMPLETED
  *
  * [SummarySyncItemWriter — 별도 배치]
- *   summary_event_status=requested + result_event_status=COMPLETED 감지
+ *   summary_event_status=requested + result_event_status=COMPLETED 감지 (인바운드 분)
  *   → KeywordProcessor (ES 형태소 분석)
  *   → MongoDB consultation_summary upsert
  *   → ES 인덱싱
@@ -47,19 +50,24 @@ public class HistoricalBatchService {
     private final HistoricalBatchProperties properties;
     private final HistoricalBatchRepository checkpointRepo;
     private final SyntheticConsultationFactory consultationFactory;
+    private final OutboundConsultationFactory outboundConsultationFactory;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public String runBatch() {
-        return runBatch(properties.getDailyCount());
+        return runBatch(properties.getDailyCount(), properties.getOutboundRatio());
     }
 
     public String runBatch(int dailyCount) {
+        return runBatch(dailyCount, properties.getOutboundRatio());
+    }
+
+    public String runBatch(int dailyCount, int outboundRatio) {
         if (!running.compareAndSet(false, true)) {
             return "이미 실행 중입니다.";
         }
         try {
-            return executeBatch(dailyCount);
+            return executeBatch(dailyCount, outboundRatio);
         } finally {
             running.set(false);
         }
@@ -71,11 +79,15 @@ public class HistoricalBatchService {
 
     // ─── 메인 루프 ─────────────────────────────────────────────────────────────
 
-    private String executeBatch(int dailyCount) {
+    private String executeBatch(int dailyCount, int outboundRatio) {
         LocalDate startDate = properties.getStartDate();
         LocalDate endDate   = properties.getEndDate();
 
-        log.info("[HistoricalBatch] 시작 — {} ~ {}, 일일 {}건", startDate, endDate, dailyCount);
+        int outboundPerDay = Math.round((float) dailyCount * outboundRatio / 100);
+        int inboundPerDay  = dailyCount - outboundPerDay;
+
+        log.info("[HistoricalBatch] 시작 — {} ~ {}, 일일 {}건 (인바운드 {}, 아웃바운드 {})",
+                startDate, endDate, dailyCount, inboundPerDay, outboundPerDay);
 
         // 날짜별 체크포인트 초기화 (이미 존재하는 날짜는 INSERT IGNORE)
         for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
@@ -90,7 +102,7 @@ public class HistoricalBatchService {
         for (LocalDate targetDate : targets) {
             checkpointRepo.markInProgress(targetDate);
             try {
-                processDate(targetDate, dailyCount);
+                processDate(targetDate, inboundPerDay, outboundPerDay);
                 checkpointRepo.markCompleted(targetDate);
                 success++;
                 log.info("[HistoricalBatch] {} 완료 ({}/{}일)", targetDate, success, targets.size());
@@ -109,44 +121,64 @@ public class HistoricalBatchService {
     // ─── 날짜 단위 처리 ────────────────────────────────────────────────────────
 
     /**
-     * 하루치 데이터를 chunkSize 단위로 나눠 생성한다.
+     * 하루치 데이터를 인바운드·아웃바운드로 분리하여 chunkSize 단위로 생성한다.
      *
-     * <p>각 청크는 독립 트랜잭션으로 커밋되며, 커밋 후 이벤트 상태를 REQUESTED로 등록한다.
-     * AI 호출과 MongoDB 저장은 이 메서드에서 하지 않는다.
+     * <ul>
+     *   <li>인바운드: 각 청크를 독립 트랜잭션으로 커밋 후 AI·요약 이벤트 등록</li>
+     *   <li>아웃바운드: 각 청크를 독립 트랜잭션으로 커밋. retention_analysis 더미 데이터 포함.
+     *       AI 추출·요약 트리거 없음.</li>
+     * </ul>
      */
-    private void processDate(LocalDate targetDate, int totalCount) {
-        int chunkSize  = properties.getChunkSize();
-        int done       = 0;
+    private void processDate(LocalDate targetDate, int inboundTotal, int outboundTotal) {
+        int chunkSize = properties.getChunkSize();
 
-        while (done < totalCount) {
-            int size = Math.min(chunkSize, totalCount - done);
+        int inboundDone = processInbound(targetDate, inboundTotal, chunkSize);
+        int outboundDone = processOutbound(targetDate, outboundTotal, chunkSize);
 
-            // Step 1: consultation_results + raw_texts + 연관 테이블 생성
-            //         @Transactional — 커밋 완료 후 반환
+        checkpointRepo.updateProgress(targetDate, inboundDone + outboundDone, 0, 0);
+
+        log.info("[HistoricalBatch] {} — 인바운드 {}건 + 아웃바운드 {}건 등록 완료",
+                targetDate, inboundDone, outboundDone);
+    }
+
+    private int processInbound(LocalDate targetDate, int total, int chunkSize) {
+        int done = 0;
+        while (done < total) {
+            int size = Math.min(chunkSize, total - done);
+
             SyntheticConsultationFactory.BatchResult result =
                     consultationFactory.executeStep1WithDate(size, targetDate);
 
             if (result.isEmpty()) {
-                log.warn("[HistoricalBatch] {} — 데이터 생성 불가 (상담사/고객 없음)", targetDate);
+                log.warn("[HistoricalBatch] {} — 인바운드 데이터 생성 불가 (상담사/고객 없음)", targetDate);
                 break;
             }
 
-            // Step 2: result_event_status = REQUESTED
-            //         → ExtractionScheduler가 감지해 Gemini API 호출
-            consultationFactory.triggerAiExtraction(
-                    result.consultIds(), result.categoryCodes());
-
-            // Step 3: summary_event_status = requested
-            //         → SummarySyncItemWriter가 감지해 MongoDB + ES 저장
+            consultationFactory.triggerAiExtraction(result.consultIds(), result.categoryCodes());
             consultationFactory.triggerSummaryGeneration(result.consultIds());
 
             done += result.consultIds().size();
-            checkpointRepo.updateProgress(targetDate, done, 0, 0);
-
-            log.debug("[HistoricalBatch] {} {}/{}건 등록", targetDate, done, totalCount);
+            log.debug("[HistoricalBatch] {} 인바운드 {}/{}건 등록", targetDate, done, total);
         }
+        return done;
+    }
 
-        log.info("[HistoricalBatch] {} — {}건 REQUESTED 등록 완료 (AI·요약은 별도 배치 처리)",
-                targetDate, done);
+    private int processOutbound(LocalDate targetDate, int total, int chunkSize) {
+        int done = 0;
+        while (done < total) {
+            int size = Math.min(chunkSize, total - done);
+
+            OutboundConsultationFactory.BatchResult result =
+                    outboundConsultationFactory.executeStep1WithDate(size, targetDate);
+
+            if (result.isEmpty()) {
+                log.warn("[HistoricalBatch] {} — 아웃바운드 데이터 생성 불가 (상담사/고객 없음)", targetDate);
+                break;
+            }
+
+            done += result.consultIds().size();
+            log.debug("[HistoricalBatch] {} 아웃바운드 {}/{}건 등록", targetDate, done, total);
+        }
+        return done;
     }
 }

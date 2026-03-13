@@ -35,7 +35,8 @@ public class HistoricalBatchController {
      */
     @PostMapping("/run")
     public ResponseEntity<Map<String, Object>> runBatch(
-            @RequestParam(required = false) Integer dailyCount) {
+            @RequestParam(required = false) Integer dailyCount,
+            @RequestParam(required = false) Integer outboundRatio) {
 
         if (!properties.isEnabled()) {
             return ResponseEntity.status(403).body(Map.of(
@@ -52,6 +53,14 @@ public class HistoricalBatchController {
             ));
         }
 
+        int resolvedRatio = (outboundRatio != null) ? outboundRatio : properties.getOutboundRatio();
+        if (resolvedRatio < 0 || resolvedRatio > 100) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "invalid_parameter",
+                    "message", "outboundRatio는 0 이상 100 이하여야 합니다. (요청값: " + resolvedRatio + ")"
+            ));
+        }
+
         if (batchService.isRunning()) {
             return ResponseEntity.status(409).body(Map.of(
                     "status", "already_running",
@@ -60,11 +69,14 @@ public class HistoricalBatchController {
         }
 
         final int finalCount = resolvedCount;
-        // 백그라운드 스레드로 실행 (HTTP 요청이 블록되지 않도록)
+        final int finalRatio = resolvedRatio;
+        int outboundPerDay = Math.round((float) finalCount * finalRatio / 100);
+        int inboundPerDay  = finalCount - outboundPerDay;
+
         Thread batchThread = new Thread(() -> {
             try {
                 log.info("[HistoricalBatch] 백그라운드 배치 시작");
-                String result = batchService.runBatch(finalCount);
+                String result = batchService.runBatch(finalCount, finalRatio);
                 log.info("[HistoricalBatch] 배치 완료: {}", result);
             } catch (Exception e) {
                 log.error("[HistoricalBatch] 배치 중 예외 발생", e);
@@ -80,8 +92,11 @@ public class HistoricalBatchController {
                         "startDate", properties.getStartDate().toString(),
                         "endDate", properties.getEndDate().toString(),
                         "dailyCount", finalCount,
+                        "outboundRatio", finalRatio,
+                        "inboundPerDay", inboundPerDay,
+                        "outboundPerDay", outboundPerDay,
                         "chunkSize", properties.getChunkSize(),
-                        "note", "AI 호출은 ExtractionScheduler, MongoDB 저장은 SummarySyncItemWriter가 처리합니다."
+                        "note", "인바운드: AI·요약 트리거 생성. 아웃바운드: retention_analysis 더미 데이터 직접 삽입."
                 )
         ));
     }
