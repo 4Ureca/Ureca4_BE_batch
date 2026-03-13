@@ -34,11 +34,21 @@ public class HistoricalBatchController {
      * 이미 실행 중이면 409를 반환한다.
      */
     @PostMapping("/run")
-    public ResponseEntity<Map<String, Object>> runBatch() {
+    public ResponseEntity<Map<String, Object>> runBatch(
+            @RequestParam(required = false) Integer dailyCount) {
+
         if (!properties.isEnabled()) {
             return ResponseEntity.status(403).body(Map.of(
                     "status", "disabled",
                     "message", "historical-batch.enabled=false — application.yml에서 true로 변경 후 재시도"
+            ));
+        }
+
+        int resolvedCount = (dailyCount != null) ? dailyCount : properties.getDailyCount();
+        if (resolvedCount < 1 || resolvedCount > 100) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "status", "invalid_parameter",
+                    "message", "dailyCount는 1 이상 100 이하여야 합니다. (요청값: " + resolvedCount + ")"
             ));
         }
 
@@ -49,11 +59,12 @@ public class HistoricalBatchController {
             ));
         }
 
+        final int finalCount = resolvedCount;
         // 백그라운드 스레드로 실행 (HTTP 요청이 블록되지 않도록)
         Thread batchThread = new Thread(() -> {
             try {
                 log.info("[HistoricalBatch] 백그라운드 배치 시작");
-                String result = batchService.runBatch();
+                String result = batchService.runBatch(finalCount);
                 log.info("[HistoricalBatch] 배치 완료: {}", result);
             } catch (Exception e) {
                 log.error("[HistoricalBatch] 배치 중 예외 발생", e);
@@ -68,7 +79,7 @@ public class HistoricalBatchController {
                 "config", Map.of(
                         "startDate", properties.getStartDate().toString(),
                         "endDate", properties.getEndDate().toString(),
-                        "dailyCount", properties.getDailyCount(),
+                        "dailyCount", finalCount,
                         "chunkSize", properties.getChunkSize(),
                         "note", "AI 호출은 ExtractionScheduler, MongoDB 저장은 SummarySyncItemWriter가 처리합니다."
                 )

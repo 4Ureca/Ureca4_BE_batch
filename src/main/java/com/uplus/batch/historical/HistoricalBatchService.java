@@ -51,11 +51,15 @@ public class HistoricalBatchService {
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public String runBatch() {
+        return runBatch(properties.getDailyCount());
+    }
+
+    public String runBatch(int dailyCount) {
         if (!running.compareAndSet(false, true)) {
             return "이미 실행 중입니다.";
         }
         try {
-            return executeBatch();
+            return executeBatch(dailyCount);
         } finally {
             running.set(false);
         }
@@ -67,10 +71,9 @@ public class HistoricalBatchService {
 
     // ─── 메인 루프 ─────────────────────────────────────────────────────────────
 
-    private String executeBatch() {
+    private String executeBatch(int dailyCount) {
         LocalDate startDate = properties.getStartDate();
         LocalDate endDate   = properties.getEndDate();
-        int dailyCount      = properties.getDailyCount();
 
         log.info("[HistoricalBatch] 시작 — {} ~ {}, 일일 {}건", startDate, endDate, dailyCount);
 
@@ -87,7 +90,7 @@ public class HistoricalBatchService {
         for (LocalDate targetDate : targets) {
             checkpointRepo.markInProgress(targetDate);
             try {
-                processDate(targetDate);
+                processDate(targetDate, dailyCount);
                 checkpointRepo.markCompleted(targetDate);
                 success++;
                 log.info("[HistoricalBatch] {} 완료 ({}/{}일)", targetDate, success, targets.size());
@@ -111,8 +114,7 @@ public class HistoricalBatchService {
      * <p>각 청크는 독립 트랜잭션으로 커밋되며, 커밋 후 이벤트 상태를 REQUESTED로 등록한다.
      * AI 호출과 MongoDB 저장은 이 메서드에서 하지 않는다.
      */
-    private void processDate(LocalDate targetDate) {
-        int totalCount = properties.getDailyCount();
+    private void processDate(LocalDate targetDate, int totalCount) {
         int chunkSize  = properties.getChunkSize();
         int done       = 0;
 
