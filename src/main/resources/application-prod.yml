@@ -14,8 +14,6 @@ spring:
 
   elasticsearch:
     uris: ${ES_URI}
-    username: ${ES_USERNAME}
-    password: ${ES_PASSWORD}
 
 gemini:
   api:
