@@ -11,7 +11,9 @@ spring:
     redis:
       cluster:
         nodes:
-          - ${REDIS_URI}:6379
+          - ${REDIS_URI}:${REDIS_PORT}
+      ssl:
+        enabled: true
 
   elasticsearch:
     uris: ${ES_URI}
