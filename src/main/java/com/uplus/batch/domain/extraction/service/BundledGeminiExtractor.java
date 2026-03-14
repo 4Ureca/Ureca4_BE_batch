@@ -135,8 +135,10 @@ public class BundledGeminiExtractor {
         for (int i = 0; i < items.size(); i++) {
             BundleItem item = items.get(i);
             boolean isChn = item.categoryCode() != null && item.categoryCode().contains("CHN");
-            sb.append(String.format("\n[%d] (카테고리: %s | 해지분석: %s)\n%s\n",
-                    i, item.categoryCode(), isChn ? "필요" : "불필요", item.rawTextJson()));
+            boolean isInbound = "INBOUND".equals(item.consultationType());
+            sb.append(String.format("\n[%d] (카테고리: %s | 상담유형: %s | 해지분석: %s)\n%s\n",
+                    i, item.categoryCode(), isInbound ? "인바운드" : "아웃바운드",
+                    isChn ? "필요" : "불필요", item.rawTextJson()));
         }
         return sb.toString();
     }
@@ -225,5 +227,5 @@ public class BundledGeminiExtractor {
 
     // ─── 입력 DTO ─────────────────────────────────────────────────────────────
 
-    public record BundleItem(long consultId, String categoryCode, String rawTextJson) {}
+    public record BundleItem(long consultId, String categoryCode, String rawTextJson, String consultationType) {}
 }

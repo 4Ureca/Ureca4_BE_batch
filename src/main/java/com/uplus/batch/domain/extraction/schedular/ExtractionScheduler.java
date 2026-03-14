@@ -104,7 +104,8 @@ public class ExtractionScheduler {
                 .map(task -> new BundleItem(
                         task.getConsultId(),
                         task.getCategoryCode(),
-                        rawTextMap.getOrDefault(task.getConsultId(), "")
+                        rawTextMap.getOrDefault(task.getConsultId(), ""),
+                        task.getConsultationType()
                 ))
                 .toList();
 
