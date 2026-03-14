@@ -1,6 +1,7 @@
 package com.uplus.batch.domain.extraction.schedular;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uplus.batch.domain.extraction.dto.AiExtractionResponse;
 import com.uplus.batch.domain.extraction.dto.BundledAiResult;
 import com.uplus.batch.domain.extraction.entity.ConsultationExtraction;
 import com.uplus.batch.domain.extraction.entity.ConsultationRawText;
@@ -66,11 +67,18 @@ public class ExtractionScheduler {
 
         log.info("[Batch] 추출 시작 — {}건 ({}건씩 번들)", pendingTasks.size(), BUNDLE_SIZE);
 
-        for (List<ResultEventStatus> bundle : partition(pendingTasks, BUNDLE_SIZE)) {
-            try {
-                processBundledTasks(bundle);
-            } catch (Exception e) {
-                log.error("[Batch] 번들 처리 중 예기치 못한 오류: {}", e.getMessage());
+        Map<String, List<ResultEventStatus>> byType = pendingTasks.stream()
+                .collect(Collectors.groupingBy(t ->
+                        t.getConsultationType() == null ? "INBOUND" : t.getConsultationType()
+                ));
+
+        for (List<ResultEventStatus> typeGroup : byType.values()) {
+            for (List<ResultEventStatus> bundle : partition(typeGroup, BUNDLE_SIZE)) {
+                try {
+                    processBundledTasks(bundle);
+                } catch (Exception e) {
+                    log.error("[Batch] 번들 처리 중 예기치 못한 오류: {}", e.getMessage());
+                }
             }
         }
 
@@ -148,14 +156,54 @@ public class ExtractionScheduler {
                 return;
             }
 
-            String actionsJson = objectMapper.writeValueAsString(
-                    aiResult.defenseActions() == null ? List.of() : aiResult.defenseActions()
-            );
+            boolean isOutbound = "OUTBOUND".equals(task.getConsultationType());
+
+            AiExtractionResponse extractionRes;
+            String actionsJson;
+            String complaintCategory;
+            String defenseCategory;
+            String outboundCallResult;
+            String outboundReport;
+            String outboundCategory;
+
+            if (isOutbound) {
+                // 아웃바운드: has_intent/defense_attempted/defense_success → NULL (인바운드 전용 컬럼)
+                extractionRes = new AiExtractionResponse(
+                        null,       // has_intent — 아웃바운드 미사용
+                        null,       // complaint_reason — 아웃바운드 미사용
+                        null,       // defense_attempted — 아웃바운드 미사용
+                        null,       // defense_success — 아웃바운드 미사용
+                        List.of(),  // defense_actions — 아웃바운드 미사용
+                        aiResult.rawSummary()
+                );
+                actionsJson       = "[]";
+                complaintCategory = null;
+                defenseCategory   = null;
+                outboundCallResult = aiResult.outboundCallResult();
+                outboundReport     = aiResult.outboundReport();
+                outboundCategory   = aiResult.outboundCategory(); // fallback은 BundledGeminiExtractor에서 처리됨
+            } else {
+                // 인바운드: AI 응답 그대로 사용
+                extractionRes = aiResult.toAiExtractionResponse();
+                actionsJson   = objectMapper.writeValueAsString(
+                        aiResult.defenseActions() == null ? List.of() : aiResult.defenseActions()
+                );
+                complaintCategory  = aiResult.complaintCategory();
+                defenseCategory    = aiResult.defenseCategory();
+                outboundCallResult = null;
+                outboundReport     = null;
+                outboundCategory   = null;
+            }
 
             ConsultationExtraction extraction = ConsultationExtraction.builder()
                     .consultId(task.getConsultId())
-                    .res(aiResult.toAiExtractionResponse())
+                    .res(extractionRes)
                     .actionsJson(actionsJson)
+                    .complaintCategory(complaintCategory)
+                    .defenseCategory(defenseCategory)
+                    .outboundCallResult(outboundCallResult)
+                    .outboundReport(outboundReport)
+                    .outboundCategory(outboundCategory)
                     .build();
 
             extractionRepository.save(extraction);
