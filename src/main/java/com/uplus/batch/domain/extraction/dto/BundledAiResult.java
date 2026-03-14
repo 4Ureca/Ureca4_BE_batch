@@ -16,7 +16,13 @@ public record BundledAiResult(
         boolean defenseAttempted,
         boolean defenseSuccess,
         List<String> defenseActions,
-        String rawSummary
+        String rawSummary,
+        String complaintCategory,
+        String defenseCategory,
+        // 아웃바운드 전용 (인바운드에서는 null)
+        String outboundCallResult,
+        String outboundReport,
+        String outboundCategory
 ) {
     /** AiExtractionResponse로 변환 — ConsultationExtraction.builder()에 전달용 */
     public AiExtractionResponse toAiExtractionResponse() {
