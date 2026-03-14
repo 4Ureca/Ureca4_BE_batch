@@ -1,5 +1,7 @@
 package com.uplus.batch.synthetic;
 
+import com.uplus.batch.domain.summary.entity.SummaryEventStatus;
+import com.uplus.batch.domain.summary.repository.SummaryEventStatusRepository;
 import com.uplus.batch.synthetic.OutboundRawTextGenerator.OutboundTextResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,14 +31,13 @@ import java.util.concurrent.ThreadLocalRandom;
  *   <li>채널: 항상 CALL (아웃바운드는 전화 방식)</li>
  *   <li>카테고리: 항상 CHN (해지방어·재약정 관련)</li>
  *   <li>원문: 상담사가 먼저 전화하는 아웃바운드 형식 ({@link OutboundRawTextGenerator})</li>
- *   <li>retention_analysis: 아웃바운드 더미 데이터 즉시 삽입
- *       (outbound_call_result·outbound_category·defense_category 포함 — V34 기준)</li>
- *   <li>AI 추출 트리거 없음: result_event_status·summary_event_status 미생성</li>
+ *   <li>retention_analysis: AI가 원문 분석 후 채움 (인바운드와 동일한 파이프라인)</li>
+ *   <li>AI 트리거: result_event_status(OUTBOUND)·summary_event_status REQUESTED 생성</li>
  * </ul>
  *
  * <p>§2 분포 조건:
  * <ul>
- *   <li>결과: 템플릿 비율에 따라 약 45% CONVERTED / 55% REJECTED</li>
+ *   <li>결과: CONVERTED 45% / REJECTED 55% (outbound_category 분포로 제어)</li>
  *   <li>고객 만족도 평가: 40% (아웃바운드 특성상 인바운드 70%보다 낮음)</li>
  *   <li>위험 감지 로그: 항상 생성 (아웃바운드 대상 = 이탈 위험 고객)</li>
  * </ul>
@@ -49,14 +50,14 @@ public class OutboundConsultationFactory {
     private final SyntheticPersonMatcher personMatcher;
     private final OutboundRawTextGenerator outboundRawTextGenerator;
     private final JdbcTemplate jdbcTemplate;
+    private final SummaryEventStatusRepository summaryEventStatusRepo;
 
-
-    public record BatchResult(List<Long> consultIds) {
+    public record BatchResult(List<Long> consultIds, List<String> categoryCodes) {
         public boolean isEmpty() { return consultIds.isEmpty(); }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Step 1: 아웃바운드 consultation_results + raw_texts + retention_analysis
+    //  Step 1: 아웃바운드 consultation_results + raw_texts
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
@@ -79,33 +80,43 @@ public class OutboundConsultationFactory {
         var agents    = personMatcher.getAgents();
         var customers = personMatcher.getCustomers();
         var chnCodes  = personMatcher.getChnCodes();
+        var feeCodes  = personMatcher.getFeeCodes();
+        var trbCodes  = personMatcher.getTrbCodes();
 
         if (agents.isEmpty() || customers.isEmpty() || chnCodes.isEmpty()) {
             log.warn("[OutboundFactory] 상담사·고객·CHN 카테고리 없음 — Step1 스킵");
-            return new BatchResult(List.of());
+            return new BatchResult(List.of(), List.of());
         }
 
         String resultSql = """
                 INSERT INTO consultation_results
                     (emp_id, customer_id, channel, category_code, duration_sec,
-                     iam_issue, iam_action, iam_memo, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     iam_issue, iam_action, iam_memo, consultation_type, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OUTBOUND', ?)
                 """;
 
-        List<Long>         consultIds  = new ArrayList<>(batchSize);
-        List<Integer>      empIds      = new ArrayList<>(batchSize);
-        List<Long>         customerIds = new ArrayList<>(batchSize);
-        List<OutboundTextResult> textResults = new ArrayList<>(batchSize);
+        List<Long>    consultIds    = new ArrayList<>(batchSize);
+        List<String>  categoryCodes = new ArrayList<>(batchSize);
+        List<Integer> empIds        = new ArrayList<>(batchSize);
+        List<Long>    customerIds   = new ArrayList<>(batchSize);
+
+        List<Object[]> rawArgs = new ArrayList<>(batchSize);
 
         for (int i = 0; i < batchSize; i++) {
             var agent    = agents.get(random.nextInt(agents.size()));
             var customer = customers.get(random.nextInt(customers.size()));
-            String categoryCode = chnCodes.get(random.nextInt(chnCodes.size()));
+            String categoryType = pickCategoryType(random.nextInt(100)); // CHN 60% / FEE 25% / TRB 15%
+            List<String> codePool = switch (categoryType) {
+                case "FEE" -> feeCodes.isEmpty() ? chnCodes : feeCodes;
+                case "TRB" -> trbCodes.isEmpty() ? chnCodes : trbCodes;
+                default    -> chnCodes;
+            };
+            String categoryCode = codePool.get(random.nextInt(codePool.size()));
             int durationSec = 120 + random.nextInt(481); // CALL: 120~600s
 
+            String outboundCategoryKey = pickOutboundCategoryKey(categoryType, random.nextInt(100));
             OutboundTextResult textResult = outboundRawTextGenerator.generate(
-                    new Random(ThreadLocalRandom.current().nextLong()));
-            textResults.add(textResult);
+                    categoryType, outboundCategoryKey, new Random(ThreadLocalRandom.current().nextLong()));
 
             final int    empId   = agent.empId();
             final long   custId  = customer.customerId();
@@ -133,23 +144,19 @@ public class OutboundConsultationFactory {
                 return ps;
             }, keyHolder);
 
-            consultIds.add(keyHolder.getKey().longValue());
+            long consultId = keyHolder.getKey().longValue();
+            consultIds.add(consultId);
+            categoryCodes.add(categoryCode);
             empIds.add(empId);
             customerIds.add(custId);
+            rawArgs.add(new Object[]{consultId, textResult.rawTextJson()});
         }
 
         // ── consultation_raw_texts Bulk INSERT ──────────────────────────────
-        List<Object[]> rawArgs = new ArrayList<>(batchSize);
-        for (int i = 0; i < batchSize; i++) {
-            rawArgs.add(new Object[]{consultIds.get(i), textResults.get(i).rawTextJson()});
-        }
         jdbcTemplate.batchUpdate(
                 "INSERT INTO consultation_raw_texts (consult_id, raw_text_json) VALUES (?, ?)",
                 rawArgs
         );
-
-        // ── retention_analysis Bulk INSERT (아웃바운드 더미 — V34 컬럼 포함) ──
-        insertRetentionAnalysis(consultIds, textResults);
 
         // ── 연관 테이블 Bulk INSERT ──────────────────────────────────────────
         insertClientReviews(consultIds, random);
@@ -158,66 +165,38 @@ public class OutboundConsultationFactory {
         log.info("[OutboundFactory] Step1 완료 — {}건 생성 | consultId 범위: {} ~ {}",
                 batchSize, consultIds.get(0), consultIds.get(consultIds.size() - 1));
 
-        return new BatchResult(consultIds);
+        return new BatchResult(consultIds, categoryCodes);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  retention_analysis 더미 데이터 삽입 (V34 컬럼 포함)
+    //  Step 2: result_event_status REQUESTED (OUTBOUND, Step1 커밋 후)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * 아웃바운드 상담 결과 기반으로 retention_analysis 더미 데이터를 삽입한다.
-     *
-     * <p>complaintCategory·defenseCategory는 {@link OutboundRawTextGenerator} 템플릿에서
-     * 결정된 값을 그대로 사용한다 (랜덤 배정 없음).
-     *
-     * <ul>
-     *   <li>CONVERTED: defense_success=true, defenseCategory=템플릿 방어코드, outbound_category=null</li>
-     *   <li>REJECTED:  defense_success=false, defenseCategory=ADM_CLOSE_FAIL/ADM_GUIDE, outbound_category=거절사유코드</li>
-     * </ul>
-     */
-    private void insertRetentionAnalysis(List<Long> consultIds,
-                                         List<OutboundTextResult> textResults) {
+    public void triggerAiExtraction(List<Long> consultIds, List<String> categoryCodes) {
         List<Object[]> args = new ArrayList<>(consultIds.size());
         for (int i = 0; i < consultIds.size(); i++) {
-            OutboundTextResult tr = textResults.get(i);
-            boolean isConverted = "CONVERTED".equals(tr.callResult());
-
-            String defenseCategory   = tr.defenseCategory();
-            String complaintCategory = tr.complaintCategory();
-
-            String defenseActionsJson = "[\"" + defenseCategory + "\"]";
-
-            String rawSummary = isConverted
-                    ? "아웃바운드 상담 - 전환 성공"
-                    : "아웃바운드 상담 - 고객 거절 (" + tr.outboundCategory() + ")";
-
-            args.add(new Object[]{
-                    consultIds.get(i),     // consult_id
-                    true,                  // has_intent (아웃바운드 대상 = 이탈 위험 고객)
-                    null,                  // complaint_reason (AI 분석에서 채울 예정)
-                    true,                  // defense_attempted (항상 방어 시도)
-                    isConverted,           // defense_success
-                    defenseActionsJson,    // defense_actions
-                    rawSummary,            // raw_summary
-                    tr.callResult(),       // outbound_call_result (CONVERTED | REJECTED)
-                    null,                  // outbound_report (AI 분석 미완료)
-                    complaintCategory,     // complaint_category (FK → analysis_code)
-                    defenseCategory,       // defense_category   (FK → analysis_code)
-                    tr.outboundCategory()  // outbound_category  (FK → analysis_code, REJECTED 시 사유 코드)
-            });
+            args.add(new Object[]{consultIds.get(i), categoryCodes.get(i)});
         }
         jdbcTemplate.batchUpdate(
                 """
-                INSERT INTO retention_analysis
-                    (consult_id, has_intent, complaint_reason, defense_attempted, defense_success,
-                     defense_actions, raw_summary, outbound_call_result, outbound_report,
-                     complaint_category, defense_category, outbound_category,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                INSERT INTO result_event_status
+                    (consult_id, category_code, consultation_type, status, retry_count, created_at, updated_at)
+                VALUES (?, ?, 'OUTBOUND', 'REQUESTED', 0, NOW(), NOW())
                 """,
                 args
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Step 3: summary_event_status REQUESTED (Step1 커밋 후)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public void triggerSummaryGeneration(List<Long> consultIds) {
+        List<SummaryEventStatus> events = new ArrayList<>(consultIds.size());
+        for (Long cid : consultIds) {
+            events.add(SummaryEventStatus.builder().consultId(cid).build());
+        }
+        summaryEventStatusRepo.saveAll(events);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -279,17 +258,79 @@ public class OutboundConsultationFactory {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * iam_memo 태그를 생성한다.
+     * iam_memo — 아웃바운드 통화 결과를 기록한다.
      * <ul>
-     *   <li>CONVERTED: {@code [SYNTHETIC][OUTBOUND] CONVERTED - <defenseCategory>}</li>
-     *   <li>REJECTED:  {@code [SYNTHETIC][OUTBOUND] REJECTED - <outboundCategory>}</li>
+     *   <li>CONVERTED: {@code CONVERTED - <defenseCategory>}</li>
+     *   <li>REJECTED:  {@code REJECTED - <outboundCategory>}</li>
      * </ul>
      */
     private String buildMemo(OutboundTextResult textResult) {
         if ("CONVERTED".equals(textResult.callResult())) {
-            return "[SYNTHETIC][OUTBOUND] CONVERTED - " + textResult.defenseCategory();
+            return "CONVERTED - " + textResult.defenseCategory();
         }
-        return "[SYNTHETIC][OUTBOUND] REJECTED - " + textResult.outboundCategory();
+        return "REJECTED - " + textResult.outboundCategory();
+    }
+
+    /**
+     * outbound_category code_name을 분포에 따라 선택한다.
+     *
+     * <p>분포 설계:
+     * <ul>
+     *   <li>CONVERTED (전환 성공): 45%</li>
+     *   <li>COST (요금/비용 문제): 16% — 가장 흔한 거절 사유</li>
+     *   <li>SWITCH (타사 전환): 11%</li>
+     *   <li>DISSATISFIED (서비스 불만): 10%</li>
+     *   <li>NO_NEED (필요 없음): 8%</li>
+     *   <li>CONSIDER (고려 중): 6%</li>
+     *   <li>OTHER (기타): 4%</li>
+     * </ul>
+     *
+     * @param categoryType "CHN" | "FEE" | "TRB"
+     * @param roll         0~99 난수
+     * @return "CONVERTED" 또는 analysis_code.outbound_category code_name
+     */
+    private String pickOutboundCategoryKey(String categoryType, int roll) {
+        return switch (categoryType) {
+            case "FEE" -> pickFeeOutboundCategoryKey(roll);
+            case "TRB" -> pickTrbOutboundCategoryKey(roll);
+            default    -> pickChnOutboundCategoryKey(roll);
+        };
+    }
+
+    /** CHN: CONVERTED 45% / COST 16% / SWITCH 11% / DISSATISFIED 10% / NO_NEED 8% / CONSIDER 6% / OTHER 4% */
+    private String pickChnOutboundCategoryKey(int roll) {
+        if (roll < 45) return "CONVERTED";
+        if (roll < 61) return "COST";
+        if (roll < 72) return "SWITCH";
+        if (roll < 82) return "DISSATISFIED";
+        if (roll < 90) return "NO_NEED";
+        if (roll < 96) return "CONSIDER";
+        return "OTHER";
+    }
+
+    /** FEE: CONVERTED 40% / COST 35% / CONSIDER 12% / SWITCH 8% / OTHER 5% */
+    private String pickFeeOutboundCategoryKey(int roll) {
+        if (roll < 40) return "CONVERTED";
+        if (roll < 75) return "COST";
+        if (roll < 87) return "CONSIDER";
+        if (roll < 95) return "SWITCH";
+        return "OTHER";
+    }
+
+    /** TRB: CONVERTED 45% / DISSATISFIED 30% / CONSIDER 12% / SWITCH 8% / OTHER 5% */
+    private String pickTrbOutboundCategoryKey(int roll) {
+        if (roll < 45) return "CONVERTED";
+        if (roll < 75) return "DISSATISFIED";
+        if (roll < 87) return "CONSIDER";
+        if (roll < 95) return "SWITCH";
+        return "OTHER";
+    }
+
+    /** 카테고리 유형 선택: CHN 60% / FEE 25% / TRB 15% */
+    private String pickCategoryType(int roll) {
+        if (roll < 60) return "CHN";
+        if (roll < 85) return "FEE";
+        return "TRB";
     }
 
     private LocalDateTime randomBusinessTime(LocalDate targetDate, ThreadLocalRandom random) {
