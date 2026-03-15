@@ -89,7 +89,7 @@ public class ConsultationAnalysisManager {
                 CompletableFuture.allOf(extractionFuture).join();
                 CompletableFuture.allOf(scoringFutures.toArray(new CompletableFuture[0])).join();
 
-                // 4. 리스트 결과 해체 및 개별 저장 (중요!)
+                // 4. 리스트 결과 해체 및 개별 저장 
                 List<AiExtractionResponse> extractionResults = extractionFuture.get();
 
                 for (int i = 0; i < pairs.size(); i++) {
@@ -128,12 +128,15 @@ public class ConsultationAnalysisManager {
     }
 
     private Map<String, String> getAnalysisCodesFromDb() {
-        List<String> targetClassifications = List.of("complaint_category", "defense_category", "outbound_category");
-        List<AnalysisCode> codes = analysisCodeRepository.findAllByClassificationIn(targetClassifications);
-        return codes.stream()
+        List<String> targets = List.of("complaint_category", "defense_category", "outbound_category");
+        
+        return analysisCodeRepository.findAllByClassificationIn(targets).stream()
                 .collect(Collectors.groupingBy(
                         AnalysisCode::getClassification,
-                        Collectors.mapping(AnalysisCode::getCodeName, Collectors.joining(", "))
+                        Collectors.mapping(
+                            code -> code.getCodeName() + "(" + code.getDescription() + ")", 
+                            Collectors.joining(", ")
+                        )
                 ));
     }
 

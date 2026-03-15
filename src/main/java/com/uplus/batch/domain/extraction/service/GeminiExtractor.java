@@ -82,14 +82,18 @@ public class GeminiExtractor {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("""
             당신은 통신사 아웃바운드(이탈방어 권유) 상담 분석 전문가입니다.
-            상담사가 이탈 위험 고객에게 먼저 전화를 건 상황임을 인지하고, 아래 %d건의 리스트를 분석하여 JSON 배열로 응답하세요.
+            아래 %d건의 리스트를 분석하여 JSON 배열로 응답하세요.
+
+            [분류 지침]: 
+            제공된 코드는 '코드명(의미/설명)' 형식입니다. 설명을 읽고 가장 적합한 '코드명'만 결과값에 사용하세요.
+            - 거절 사유 코드 목록: %s
 
             [응답 형식]: 반드시 아래 필드만 포함한 JSON 객체들의 '배열'([])로 응답하세요. (순서 엄수)
             {
               "raw_summary": "상황 → 조치 → 결과 형태의 단 한 문장 요약",
               "outbound_call_result": "고객 유지 시 CONVERTED, 거절 시 REJECTED",
               "outbound_report": "결과에 대한 핵심 요약 1~2문장",
-              "outbound_category": "REJECTED인 경우 다음 코드 중 하나 선택: %s (CONVERTED면 null)"
+              "outbound_category": "REJECTED인 경우 위 목록 중 '코드명' 하나만 선택 (CONVERTED면 null)"
             }
             
             [상담 목록]:
@@ -107,18 +111,23 @@ public class GeminiExtractor {
     private String buildChnBatchPrompt(List<String> issues, String compCodes, String defCodes) {
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("""
-            당신은 통신사 해지방어 상담 분석 전문가입니다. 고객의 인바운드 해지 문의 과정을 분석하여 아래 %d건의 리스트를 JSON 배열로 응답하세요.
+            당신은 통신사 해지방어 상담 분석 전문가입니다. 고객의 해지 문의 과정을 분석하여 아래 %d건의 리스트를 JSON 배열로 응답하세요.
+
+            [분류 지침]:
+            아래 카테고리 목록은 '코드명(상세 설명)'으로 구성되어 있습니다. 상세 설명을 바탕으로 문맥을 정확히 파악하되, JSON 결과값에는 괄호를 제외한 '코드명'만 입력하세요.
+            - 고객 불만 카테고리: %s
+            - 상담사 방어 카테고리: %s
 
             [응답 형식]: 반드시 아래 필드만 포함한 JSON 객체들의 '배열'([])로 응답하세요. (순서 엄수)
             {
               "raw_summary": "상황 → 조치 → 결과 형태의 단 한 문장 요약",
-              "has_intent": 고객의 해지/이탈 의사가 명확히 존재하는지 여부 (boolean),
-              "complaint_reason": "고객의 주된 불만 사유를 핵심만 담은 간결한 명사구",
-              "complaint_category": "다음 코드 중 가장 알맞은 1개 선택: %s",
+              "has_intent": 고객의 해지/이탈 의사 존재 여부 (boolean),
+              "complaint_reason": "고객의 주된 불만 사유 핵심 요약",
+              "complaint_category": "위 목록 중 가장 알맞은 '코드명' 1개 선택",
               "defense_attempted": 상담사의 방어 시도 여부 (boolean),
-              "defense_success": 최종적으로 방어에 성공(유지)했는지 여부 (boolean),
+              "defense_success": 최종 방어 성공 여부 (boolean),
               "defense_actions": ["방어 조치 2~4개를 짧은 명사구 배열"],
-              "defense_category": "상담사 전략을 다음 코드 중 1개 선택: %s"
+              "defense_category": "위 목록 중 가장 알맞은 '코드명' 1개 선택"
             }
 
             [상담 목록]:
