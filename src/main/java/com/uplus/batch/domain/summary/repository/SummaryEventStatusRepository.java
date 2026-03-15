@@ -136,7 +136,8 @@ public class SummaryEventStatusRepository {
           rs.getString("category_code"),
           rs.getString("large_category"),
           rs.getString("medium_category"),
-          rs.getString("small_category")
+          rs.getString("small_category"),
+          rs.getString("consultation_type")
       );
 
   public List<SummaryEventStatusRow> findRequestedBatchAfterIdBeforeCreatedAt(
@@ -213,7 +214,9 @@ public class SummaryEventStatusRepository {
             r.category_code,
             cat.large_category,
             cat.medium_category,
-            cat.small_category
+            cat.small_category,
+
+            r.consultation_type
 
         FROM consultation_results r
         LEFT JOIN employees e ON r.emp_id = e.emp_id
@@ -325,7 +328,10 @@ public class SummaryEventStatusRepository {
             defense_success,
             defense_actions,
             complaint_reason,
-            raw_summary
+            raw_summary,
+            outbound_call_result,
+            outbound_category,
+            outbound_report
         FROM retention_analysis
         WHERE consult_id IN (%s)
         """.formatted(inSql);
@@ -348,7 +354,10 @@ public class SummaryEventStatusRepository {
           rs.getBoolean("defense_success"),
           actions,
           rs.getString("complaint_reason"),
-          rs.getString("raw_summary")
+          rs.getString("raw_summary"),
+          rs.getString("outbound_call_result"),
+          rs.getString("outbound_category"),
+          rs.getString("outbound_report")
       );
 
     }, consultIds.toArray(new Object[0]));

@@ -422,7 +422,7 @@ public class SummarySyncItemWriter implements ItemWriter<SummaryEventStatusRow> 
       KeywordResult keywordResult
   ) {
 
-    return new Update()
+    Update update = new Update()
         .set("consultId", row.consultId())
         .set("consultedAt", row.createdAt())
         .set("channel", row.channel())
@@ -477,19 +477,38 @@ public class SummarySyncItemWriter implements ItemWriter<SummaryEventStatusRow> 
                     .build()
         )
 
-        .set("cancellation",
-            retention == null ? null :
-                ConsultationSummary.Cancellation.builder()
-                    .intent(retention.hasIntent())
-                    .defenseAttempted(retention.defenseAttempted())
-                    .defenseSuccess(retention.defenseSuccess())
-                    .defenseActions(retention.defenseActions())
-                    .complaintReasons(retention.complaintReason())
-                    .build()
-        )
+        .set("consultType",
+            "OUTBOUND".equals(row.consultationType()) ? "OUT" : "IN");
 
-        .set("resultProducts", resultProducts)
+    if (!"OUTBOUND".equals(row.consultationType())) {
+      // 인바운드 전용 필드
+      update.set("cancellation",
+          retention == null ? null :
+              ConsultationSummary.Cancellation.builder()
+                  .intent(retention.hasIntent())
+                  .defenseAttempted(retention.defenseAttempted())
+                  .defenseSuccess(retention.defenseSuccess())
+                  .defenseActions(retention.defenseActions())
+                  .complaintReasons(retention.complaintReason())
+                  .build()
+      );
+      update.set("resultProducts", resultProducts);
+    } else {
+      // 아웃바운드 전용 필드
+      if (retention != null && retention.outboundCallResult() != null) {
+        Map<String, Object> outboundMap = new java.util.HashMap<>();
+        outboundMap.put("callResult", retention.outboundCallResult());
+        outboundMap.put("rejectReason", retention.outboundCategory() != null
+            ? List.of(retention.outboundCategory()) : List.of());
+        outboundMap.put("outboundReport", retention.outboundReport());
+        update.set("outbound", outboundMap);
+      } else {
+        update.set("outbound", null);
+      }
+    }
 
-        .setOnInsert("createdAt", LocalDateTime.now());
+    update.setOnInsert("createdAt", LocalDateTime.now());
+
+    return update;
   }
 }
