@@ -1,12 +1,7 @@
 package com.uplus.batch.domain.extraction.schedular;
 
-import java.util.List;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.uplus.batch.domain.extraction.dto.AiExtractionResponse;
+import com.uplus.batch.domain.extraction.dto.BundledAiResult;
 import com.uplus.batch.domain.extraction.entity.ConsultationExtraction;
 import com.uplus.batch.domain.extraction.entity.ConsultationRawText;
 import com.uplus.batch.domain.extraction.entity.EventStatus;
@@ -14,102 +9,194 @@ import com.uplus.batch.domain.extraction.entity.ResultEventStatus;
 import com.uplus.batch.domain.extraction.repository.ConsultationExtractionRepository;
 import com.uplus.batch.domain.extraction.repository.ConsultationRawTextRepository;
 import com.uplus.batch.domain.extraction.repository.EventStatusRepository;
-import com.uplus.batch.domain.extraction.service.ConsultationExtractionManager;
+import com.uplus.batch.domain.extraction.service.BundledGeminiExtractor;
+import com.uplus.batch.domain.extraction.service.BundledGeminiExtractor.BundleItem;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * AI 한 줄 요약 추출 스케줄러.
+ *
+ * <h3>번들 처리 방식 (비용 최적화)</h3>
+ * <pre>
+ * 1. result_event_status=REQUESTED 최대 50건 조회
+ * 2. 20건씩 분할 → 1회 Gemini API 호출로 20건 동시 처리
+ *    (기존 1건/호출 대비 최대 20배 비용 절감)
+ * 3. 번들 내 각 건 결과를 개별 트랜잭션으로 저장 (실패 격리)
+ * </pre>
+ *
+ * <h3>장애 처리</h3>
+ * <ul>
+ *   <li>번들 API 호출 자체 실패 → 번들 전체 FAILED (RetryScheduler 재처리)</li>
+ *   <li>번들 내 개별 저장 실패 → 해당 건만 FAILED (나머지 성공 건 유지)</li>
+ *   <li>API 재시도: 지수 백오프 3회 (BundledGeminiExtractor 내장)</li>
+ * </ul>
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class ExtractionScheduler {
 
-    private final EventStatusRepository eventRepository;
-    private final ConsultationRawTextRepository rawTextRepository;
-    private final ConsultationExtractionRepository extractionRepository;
-    private final ConsultationExtractionManager extractionManager;
-    private final ObjectMapper objectMapper;
+    private static final int BUNDLE_SIZE = 20;
 
-    /**
-     * 1분마다 실행되는 메인 엔진
-     * 전체 트랜잭션을 걸지 않아 개별 작업의 실패가 전체에 영향을 주지 않습니다.
-     */
-    // fixedDelayString으로 변경하여 테스트 시 application.yml의 extraction.fixed-delay로 제어 가능
-    // 기본값 60000ms (1분), 테스트 시 99999999ms로 설정하여 자동 실행 방지
+    private final EventStatusRepository            eventRepository;
+    private final ConsultationRawTextRepository    rawTextRepository;
+    private final ConsultationExtractionRepository extractionRepository;
+    private final BundledGeminiExtractor           bundledExtractor;
+    private final ObjectMapper                     objectMapper;
+
     @Scheduled(fixedDelayString = "${extraction.fixed-delay:60000}")
     public void executeExtractionJob() {
-        log.info("[Batch]추출 스케줄러 엔진 가동 - 대기 데이터 확인 중...");
-
-        List<ResultEventStatus> pendingTasks = eventRepository.findTop50ByStatusOrderByCreatedAtAsc(EventStatus.REQUESTED);
+        List<ResultEventStatus> pendingTasks =
+                eventRepository.findTop50ByStatusOrderByCreatedAtAsc(EventStatus.REQUESTED);
 
         if (pendingTasks.isEmpty()) {
-            log.info("[Batch]추출 처리할 대기 데이터(REQUESTED)가 없습니다.");
+            log.info("[Batch] 처리할 REQUESTED 데이터 없음");
             return;
         }
 
-        log.info("[Batch] 추출 프로세스 시작 - 대상: {}건", pendingTasks.size());
+        log.info("[Batch] 추출 시작 — {}건 ({}건씩 번들)", pendingTasks.size(), BUNDLE_SIZE);
 
-        for (ResultEventStatus task : pendingTasks) {
+        for (List<ResultEventStatus> bundle : partition(pendingTasks, BUNDLE_SIZE)) {
             try {
-                processIndividualTask(task);
+                processBundledTasks(bundle);
             } catch (Exception e) {
-                log.error("[Critical Error] 상담 ID {} 처리 중 예상치 못한 시스템 오류: {}", task.getConsultId(), e.getMessage());
+                log.error("[Batch] 번들 처리 중 예기치 못한 오류: {}", e.getMessage());
             }
         }
-        log.info("[Batch] 추출 프로세스 종료");
+
+        log.info("[Batch] 추출 완료");
     }
 
-    /**
-     * 개별 작업에 대해 새로운 트랜잭션을 시작합니다.
-     * 한 건이 실패해도 다른 건의 DB 반영에는 영향을 주지 않습니다.
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void processIndividualTask(ResultEventStatus task) {
+    // ─── 번들 단위 처리 ───────────────────────────────────────────────────────
+
+    private void processBundledTasks(List<ResultEventStatus> bundle) {
+
+        // 1. 선점 — 모두 PROCESSING으로 변경 (중복 처리 방지)
+        for (ResultEventStatus task : bundle) {
+            markAsProcessing(task);
+        }
+
+        // 2. raw_text_json 일괄 조회 (IN 쿼리 1번)
+        List<Long> consultIds = bundle.stream()
+                .map(ResultEventStatus::getConsultId).toList();
+
+        Map<Long, String> rawTextMap = rawTextRepository
+                .findAllByConsultIdIn(consultIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        ConsultationRawText::getConsultId,
+                        ConsultationRawText::getRawTextJson,
+                        (a, b) -> a
+                ));
+
+        // 3. 번들 아이템 구성
+        List<BundleItem> items = bundle.stream()
+                .map(task -> new BundleItem(
+                        task.getConsultId(),
+                        task.getCategoryCode(),
+                        rawTextMap.getOrDefault(task.getConsultId(), "")
+                ))
+                .toList();
+
+        // 4. 번들 AI 호출 — 20건 → Gemini 1회 (지수 백오프 내장)
+        List<BundledAiResult> aiResults;
         try {
-            // 1. [선점] 상태를 PROCESSING으로 변경하여 중복 처리 방지
-            task.start();
-            eventRepository.saveAndFlush(task);
+            aiResults = bundledExtractor.extractBatch(items, 3, 5000);
+        } catch (Exception e) {
+            // API 자체 실패 → 번들 전체 FAILED (RetryScheduler가 재배치)
+            log.error("[Batch] 번들 AI 호출 실패 → {}건 전체 FAILED: {}", bundle.size(), e.getMessage());
+            for (ResultEventStatus task : bundle) {
+                markAsFailed(task, e.getMessage());
+            }
+            return;
+        }
 
-            // 2. [데이터 로드] 원본 데이터 조회
-            ConsultationRawText rawData = rawTextRepository.findByConsultId(task.getConsultId())
-                    .orElseThrow(() -> new RuntimeException("원본 대화 데이터를 찾을 수 없습니다."));
+        // 5. 결과 저장 — 건별 독립 처리 (한 건 실패가 나머지에 영향 없음)
+        Map<Long, BundledAiResult> resultMap = aiResults.stream()
+                .collect(Collectors.toMap(BundledAiResult::consultId, r -> r, (a, b) -> a));
 
-            // 3. [AI 추출] 
-            AiExtractionResponse result = extractionManager.runExtraction(
-                    task.getCategoryCode(), 
-                    rawData.getRawTextJson()
-            );
+        for (ResultEventStatus task : bundle) {
+            saveExtractionResult(task, resultMap.get(task.getConsultId()));
+        }
+    }
 
-            // 4. [검증] AI 응답 결과가 비어있는지 체크 (raw_summary null 방어)
-            if (result.raw_summary() == null || result.raw_summary().isBlank()) {
-                throw new RuntimeException("AI가 내용을 생성하지 못했습니다.");
+    // ─── 개별 결과 저장 (@Transactional REQUIRES_NEW) ─────────────────────────
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void saveExtractionResult(ResultEventStatus task, BundledAiResult aiResult) {
+        try {
+            if (aiResult == null || !aiResult.isSuccess()) {
+                task.fail("AI 응답 없음 또는 raw_summary 비어있음");
+                eventRepository.saveAndFlush(task);
+                return;
             }
 
-            // 5. [저장] 결과 적재
-            String actionsJson = objectMapper.writeValueAsString(result.defense_actions());
+            if (aiResult.rawSummary() == null || aiResult.rawSummary().isBlank()) {
+                task.fail("AI가 내용을 생성하지 못했습니다.");
+                eventRepository.saveAndFlush(task);
+                return;
+            }
+
+            String actionsJson = objectMapper.writeValueAsString(
+                    aiResult.defenseActions() == null ? List.of() : aiResult.defenseActions()
+            );
+
             ConsultationExtraction extraction = ConsultationExtraction.builder()
                     .consultId(task.getConsultId())
-                    .res(result)
+                    .res(aiResult.toAiExtractionResponse())
                     .actionsJson(actionsJson)
                     .build();
 
             extractionRepository.save(extraction);
 
-            // 6. [성공 마감]
             task.complete();
             eventRepository.saveAndFlush(task);
             log.info("[Success] 상담 ID {} 추출 완료", task.getConsultId());
 
         } catch (Exception e) {
-        	log.error("[Task Failed] ID {}: {}", task.getConsultId(), e.getMessage());
-
-            //에러 메시지 방어: DB 컬럼 길이를 넘지 않게 200자에서 자릅니다.
-            String errorMsg = e.getMessage();
-            if (errorMsg != null && errorMsg.length() > 200) {
-                errorMsg = errorMsg.substring(0, 200) + "...";
-            }
-            
-            task.fail(errorMsg);
-            eventRepository.saveAndFlush(task); 
+            log.error("[Task Failed] ID {}: {}", task.getConsultId(), e.getMessage());
+            task.fail(trim(e.getMessage()));
+            eventRepository.saveAndFlush(task);
         }
+    }
+
+    // ─── 상태 변경 헬퍼 ───────────────────────────────────────────────────────
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markAsProcessing(ResultEventStatus task) {
+        task.start();
+        eventRepository.saveAndFlush(task);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markAsFailed(ResultEventStatus task, String reason) {
+        task.fail(trim(reason));
+        eventRepository.saveAndFlush(task);
+    }
+
+    // ─── 유틸 ─────────────────────────────────────────────────────────────────
+
+    /** 리스트를 size 크기로 분할한다 */
+    private <T> List<List<T>> partition(List<T> list, int size) {
+        List<List<T>> result = new ArrayList<>();
+        for (int i = 0; i < list.size(); i += size) {
+            result.add(list.subList(i, Math.min(i + size, list.size())));
+        }
+        return result;
+    }
+
+    private String trim(String msg) {
+        if (msg == null) return null;
+        return msg.length() > 200 ? msg.substring(0, 200) + "..." : msg;
     }
 }

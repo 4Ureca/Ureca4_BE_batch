@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -102,6 +103,20 @@ public class SyntheticConsultationFactory {
      */
     @Transactional
     public BatchResult executeStep1(int batchSize) {
+        return executeStep1WithDate(batchSize, null);
+    }
+
+    /**
+     * 과거 데이터 생성용 오버로드 — targetDate가 지정되면 해당 날짜의 랜덤 업무시간으로 created_at을 설정한다.
+     *
+     * <p>HistoricalBatchService에서 호출하여 특정 날짜의 상담 데이터를 소급 생성한다.
+     *
+     * @param batchSize  생성할 건수
+     * @param targetDate null이면 현재 시각 사용, 지정하면 해당 날짜 8~18시 내 랜덤 시각
+     * @return 생성된 (consultId 목록, categoryCode 목록) 쌍
+     */
+    @Transactional
+    public BatchResult executeStep1WithDate(int batchSize, LocalDate targetDate) {
         var random    = ThreadLocalRandom.current();
         var agents    = personMatcher.getAgents();
         var customers = personMatcher.getCustomers();
@@ -146,7 +161,9 @@ public class SyntheticConsultationFactory {
             final String issue      = iam[0];
             final String action     = iam[1];
             final String finalMemo  = memo;
-            final LocalDateTime now = LocalDateTime.now();
+            final LocalDateTime now = (targetDate != null)
+                    ? randomBusinessTime(targetDate, random)
+                    : LocalDateTime.now();
 
             KeyHolder keyHolder = new GeneratedKeyHolder();
             jdbcTemplate.update(con -> {
@@ -410,6 +427,17 @@ public class SyntheticConsultationFactory {
     // ─────────────────────────────────────────────────────────
     //  IAM 템플릿 선택
     // ─────────────────────────────────────────────────────────
+
+    /**
+     * targetDate의 업무 시간대(08:00 ~ 18:00) 내 랜덤 시각을 반환한다.
+     * 과거 데이터 생성 시 created_at을 해당 날짜에 맞추기 위해 사용한다.
+     */
+    private LocalDateTime randomBusinessTime(LocalDate targetDate, ThreadLocalRandom random) {
+        int hour   = 8 + random.nextInt(10);      // 08 ~ 17시
+        int minute = random.nextInt(60);
+        int second = random.nextInt(60);
+        return targetDate.atTime(hour, minute, second);
+    }
 
     /** categoryCode 접두사(M_FEE_01 → "FEE")로 IAM 세트 선택. 미매핑 시 ETC 폴백. */
     private String[] pickIamTemplate(String categoryCode, int randomIndex) {
