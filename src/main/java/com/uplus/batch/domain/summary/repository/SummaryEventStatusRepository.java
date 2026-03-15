@@ -217,7 +217,7 @@ public class SummaryEventStatusRepository {
             cat.small_category,
 
             CASE
-                WHEN r.category_code LIKE 'M_OTB%' THEN 'OUT'
+                WHEN r.category_code LIKE 'M_OTB%%' THEN 'OUT'
                 ELSE 'IN'
             END AS consultation_type
 
@@ -344,7 +344,6 @@ public class SummaryEventStatusRepository {
     List<RetentionAnalysisRow> rows = jdbcTemplate.query(sql, (rs, rowNum) -> {
 
       List<String> actions = null;
-      List<String> defenseCategory = null;
 
       try {
         String json = rs.getString("defense_actions");
@@ -353,18 +352,13 @@ public class SummaryEventStatusRepository {
         }
       } catch (Exception ignored) {}
 
-      String defenseCategoryCode = rs.getString("defense_category");
-      if (defenseCategoryCode != null) {
-        defenseCategory = List.of(defenseCategoryCode);
-      }
-
       return new RetentionAnalysisRow(
           rs.getLong("consult_id"),
           rs.getObject("has_intent", Boolean.class),
           rs.getObject("defense_attempted", Boolean.class),
           rs.getObject("defense_success", Boolean.class),
           actions,
-          defenseCategory,
+          rs.getString("defense_category"),
           rs.getString("complaint_reason"),
           rs.getString("complaint_category"),
           rs.getString("raw_summary"),

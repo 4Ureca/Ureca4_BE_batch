@@ -66,11 +66,7 @@ public class SearchDocBuilder {
     doc.put("defenseAttempted", can == null ? null : can.getDefenseAttempted());
     doc.put("defenseSuccess", can == null ? null : can.getDefenseSuccess());
     doc.put("complaintCategory", can == null ? null : can.getComplaintCategory());
-    doc.put("defenseCategory",
-        can == null || can.getDefenseCategory() == null || can.getDefenseCategory().isEmpty()
-            ? null
-            : can.getDefenseCategory().get(0));
-
+    doc.put("defenseCategory", can == null ? null : can.getDefenseCategory());
     doc.put("outboundResult", out == null ? null : out.getCallResult());
     doc.put("outboundCategory", out == null ? null : out.getRejectReason());
 

@@ -158,6 +158,22 @@
         "type": "boolean"
       },
 
+      "complaintCategory": {
+        "type": "keyword"
+      },
+
+      "defenseCategory": {
+        "type": "keyword"
+      },
+
+      "outboundResult": {
+        "type": "keyword"
+      },
+
+      "outboundCategory": {
+        "type": "keyword"
+      },
+
       "changeTypes": {
         "type": "keyword"
       },

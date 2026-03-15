@@ -8,7 +8,7 @@ public record RetentionAnalysisRow(
     Boolean defenseAttempted,
     Boolean defenseSuccess,
     List<String> defenseActions,
-    List<String> defenseCategory,
+    String defenseCategory,
     String complaintReason,
     String complaintCategory,
     String rawSummary,

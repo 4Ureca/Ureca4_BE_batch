@@ -109,7 +109,7 @@ public class ConsultationSummary {
     private Boolean defenseSuccess;
     private List<String> defenseActions;
     private String complaintCategory;
-    private List<String> defenseCategory;
+    private String defenseCategory;
     private String complaintReasons;
   }
 
