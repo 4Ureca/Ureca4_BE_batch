@@ -18,7 +18,8 @@ class BundledAiResultTest {
                 0, 1L, "M_CHN_04",
                 true, "요금 불만", true, false,
                 List.of("할인 제안"),
-                "고객이 요금 불만으로 해지 요청, 할인 제안 후 재약정 유도"
+                "고객이 요금 불만으로 해지 요청, 할인 제안 후 재약정 유도",
+                null, null, null, null, null
         );
         assertThat(result.isSuccess()).isTrue();
     }
@@ -28,7 +29,8 @@ class BundledAiResultTest {
     void isSuccess_NullSummary_ReturnsFalse() {
         BundledAiResult result = new BundledAiResult(
                 0, 1L, "M_CHN_04",
-                false, null, false, false, List.of(), null
+                false, null, false, false, List.of(), null,
+                null, null, null, null, null
         );
         assertThat(result.isSuccess()).isFalse();
     }
@@ -38,7 +40,8 @@ class BundledAiResultTest {
     void isSuccess_BlankSummary_ReturnsFalse() {
         BundledAiResult result = new BundledAiResult(
                 0, 1L, "M_CHN_04",
-                false, null, false, false, List.of(), "   "
+                false, null, false, false, List.of(), "   ",
+                null, null, null, null, null
         );
         assertThat(result.isSuccess()).isFalse();
     }
@@ -48,7 +51,8 @@ class BundledAiResultTest {
     void isSuccess_FallbackMarker_ReturnsFalse() {
         BundledAiResult result = new BundledAiResult(
                 0, 1L, "M_CHN_04",
-                false, null, false, false, List.of(), "[AI 분석 누락]"
+                false, null, false, false, List.of(), "[AI 분석 누락]",
+                null, null, null, null, null
         );
         assertThat(result.isSuccess()).isFalse();
     }
@@ -61,7 +65,8 @@ class BundledAiResultTest {
                 0, 1L, "M_CHN_04",
                 true, "요금 불만", true, false,
                 actions,
-                "고객이 해지 요청, 할인 제안 후 재약정"
+                "고객이 해지 요청, 할인 제안 후 재약정",
+                null, null, null, null, null
         );
 
         AiExtractionResponse response = result.toAiExtractionResponse();
@@ -81,7 +86,8 @@ class BundledAiResultTest {
                 0, 1L, "M_FEE_01",
                 false, null, false, false,
                 null,
-                "고객 요금 문의 처리 완료"
+                "고객 요금 문의 처리 완료",
+                null, null, null, null, null
         );
 
         AiExtractionResponse response = result.toAiExtractionResponse();

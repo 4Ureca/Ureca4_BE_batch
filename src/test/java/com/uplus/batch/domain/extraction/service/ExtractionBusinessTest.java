@@ -54,7 +54,8 @@ class ExtractionBusinessTest {
                 0, 100L, "M_CHN_04",
                 true, "비싼 요금제", true, false,
                 List.of("할인 제안"),
-                "고객이 요금 불만으로 해지 요청, 할인 제안 후 재약정 유도"
+                "고객이 요금 불만으로 해지 요청, 할인 제안 후 재약정 유도",
+                null, null, null, null, null
         );
         given(eventRepository.saveAndFlush(any())).willReturn(testTask);
 
@@ -88,7 +89,8 @@ class ExtractionBusinessTest {
         BundledAiResult aiResult = new BundledAiResult(
                 0, 100L, "M_CHN_04",
                 false, null, false, false,
-                List.of(), ""
+                List.of(), "",
+                null, null, null, null, null
         );
         given(eventRepository.saveAndFlush(any())).willReturn(testTask);
 

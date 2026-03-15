@@ -40,4 +40,10 @@ public class HistoricalBatchProperties {
      * 기본값 100이 적정.
      */
     private int chunkSize = 100;
+
+    /**
+     * 아웃바운드 상담 비율 (0~100).
+     * 예) 30 → 일일 생성 건수 중 30%는 아웃바운드, 나머지 70%는 인바운드로 생성.
+     */
+    private int outboundRatio = 30;
 }
