@@ -80,14 +80,7 @@
       },
 
       "customerName": {
-        "type": "text",
-        "analyzer": "consult_index_analyzer",
-        "search_analyzer": "consult_search_analyzer",
-        "fields": {
-          "raw": {
-            "type": "keyword"
-          }
-        }
+        "type": "keyword"
       },
 
       "phone": {
