@@ -63,6 +63,7 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
 
         // 2. consultation_summary에서 해지 의향(cancellation.intent=true) 건 조회
         Query query = new Query(Criteria.where("consultedAt").gte(startAt).lte(endAt)
+                .and("category.code").not().regex("^M_OTB")
                 .and("cancellation.intent").is(true));
         List<Document> intentDocs = mongoTemplate.find(query, Document.class, "consultation_summary");
 

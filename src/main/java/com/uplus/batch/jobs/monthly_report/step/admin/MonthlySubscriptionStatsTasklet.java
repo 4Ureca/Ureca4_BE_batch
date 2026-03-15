@@ -56,7 +56,8 @@ public class MonthlySubscriptionStatsTasklet implements Tasklet {
     log.info("[MonthlyStats] {} ~ {} 집계 시작", startAt, endAt);
 
     // 2. MongoDB에서 상담 요약 데이터 조회 (컬렉션명: consultation_summary)
-    Query query = new Query(Criteria.where("consultedAt").gte(startAt).lte(endAt));
+    Query query = new Query(Criteria.where("consultedAt").gte(startAt).lte(endAt)
+            .and("category.code").not().regex("^M_OTB"));
     List<Document> summaries = mongoTemplate.find(query, Document.class, "consultation_summary");
 
     // 3. 집계를 위한 임시 Map (ID별 Stats 저장)

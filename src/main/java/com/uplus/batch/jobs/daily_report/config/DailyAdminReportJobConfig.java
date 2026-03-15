@@ -1,5 +1,6 @@
 package com.uplus.batch.jobs.daily_report.config;
 
+import com.uplus.batch.jobs.common.step.outbound.OutboundStatsTasklet;
 import com.uplus.batch.jobs.daily_report.step.customer_risk.CustomerRiskTasklet;
 import com.uplus.batch.jobs.daily_report.step.hourly_consult.HourlyConsultTasklet;
 import com.uplus.batch.jobs.daily_report.step.keyword_rank.KeywordRankTasklet;
@@ -23,6 +24,8 @@ import org.springframework.transaction.PlatformTransactionManager;
  *   2. dailyKeywordStep         — 키워드 집계
  *   3. dailyCustomerRiskStep    — 고객 특이사항(리스크) 집계
  *   4. dailyHourlyConsultStep   — 시간대별 이슈 트렌드 집계
+ *   5. dailyQualityAnalysisStep — 상담 품질 분석 집계
+ *   6. dailyOutboundStatsStep   — 아웃바운드 통계 집계
  *
  * 실행:
  *   curl -X POST "http://localhost:8081/api/jobs/run-daily-batch?date=2025-01-18"
@@ -40,13 +43,15 @@ public class DailyAdminReportJobConfig {
             Step dailyKeywordStep,
             Step dailyCustomerRiskStep,
             Step dailyHourlyConsultStep,
-            Step dailyQualityAnalysisStep) {
+            Step dailyQualityAnalysisStep,
+            Step dailyOutboundStatsStep) {
         return new JobBuilder("dailyAdminReportJob", jobRepository)
                 .start(dailyPerformanceStep)
                 .next(dailyKeywordStep)
                 .next(dailyCustomerRiskStep)
                 .next(dailyHourlyConsultStep)
                 .next(dailyQualityAnalysisStep)
+                .next(dailyOutboundStatsStep)
                 .build();
     }
 
@@ -83,5 +88,12 @@ public class DailyAdminReportJobConfig {
         return new StepBuilder("dailyQualityAnalysisStep", jobRepository)
             .tasklet(qualityAnalysisTasklet, transactionManager)
             .build();
+    }
+
+    @Bean
+    public Step dailyOutboundStatsStep(OutboundStatsTasklet outboundStatsTasklet) {
+        return new StepBuilder("dailyOutboundStatsStep", jobRepository)
+                .tasklet(outboundStatsTasklet, transactionManager)
+                .build();
     }
 }

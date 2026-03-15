@@ -119,8 +119,19 @@ public class HourlyConsultTasklet implements Tasklet {
         List<HourlyConsultResult.CategoryBreakdown> categoryBreakdown = buildCategoryBreakdown(
                 categoryDocs, slotTotalCount);
 
-        // 2) [변경] 키워드 집계: MySQL 원문 → Nori analyze (유진님 방식)
-        Map<String, Long> currentKeywords = aggregateKeywordsFromRawText(slotStart, slotEnd);
+        // 2) [변경] 키워드 집계: ES consult-keyword-index (인바운드만)
+        //    MongoDB에서 인바운드 consultId 목록을 뽑아 ES ids 필터에 사용
+        List<String> inboundIds = mongoTemplate.find(
+                new Query(Criteria.where("consultedAt").gte(slotStart).lt(slotEnd)
+                        .and("category.code").not().regex("^M_OTB")),
+                Document.class, COLLECTION
+        ).stream()
+                .map(d -> String.valueOf(d.get("consultId")))
+                .collect(Collectors.toList());
+
+        Map<String, Long> currentKeywords = inboundIds.isEmpty()
+                ? Collections.emptyMap()
+                : aggregateKeywordsFromRawText(slotStart, slotEnd, inboundIds);
 
         // 3) 전일 같은 슬롯 키워드 조회 → 증감율/신규 계산
         Map<String, Long> previousKeywords = loadPreviousSlotKeywords(
@@ -194,6 +205,7 @@ public class HourlyConsultTasklet implements Tasklet {
         Aggregation aggregation = Aggregation.newAggregation(
                 Aggregation.match(
                         Criteria.where("consultedAt").gte(slotStart).lt(slotEnd)
+                                .and("category.code").not().regex("^M_OTB")
                 ),
                 Aggregation.group("category.large")
                         .count().as("count")
@@ -235,22 +247,13 @@ public class HourlyConsultTasklet implements Tasklet {
     // ═══════════════════════════════════════════════════════
 
     private Map<String, Long> aggregateKeywordsFromRawText(
-            LocalDateTime start, LocalDateTime end) throws Exception {
-
-        String startStr = start.toString();
-        String endStr = end.toString();
+            LocalDateTime start, LocalDateTime end, List<String> inboundIds) throws Exception {
 
         SearchResponse<Void> response = elasticsearchClient.search(s -> s
                 .index("consult-keyword-index")
                 .size(0)
                 .query(q -> q
-                    .range(r -> r
-                        .date(d -> d
-                            .field("date")
-                            .gte(startStr)
-                            .lt(endStr)
-                        )
-                    )
+                    .ids(ids -> ids.values(inboundIds))
                 )
                 .aggregations("slot_keywords", a -> a
                     .terms(t -> t.field("customer.search").size(TOP_KEYWORD_SIZE * 2))

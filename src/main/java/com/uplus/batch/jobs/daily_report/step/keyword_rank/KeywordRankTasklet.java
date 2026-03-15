@@ -20,8 +20,11 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -46,18 +49,28 @@ public class KeywordRankTasklet implements Tasklet {
     String startOfDay = targetDate.atStartOfDay().toString();
     String endOfDay = targetDate.atTime(LocalTime.MAX).toString();
 
-    // 1. 쿼리 객체 생성 (고객 발화 키워드 집계용)
+    // MongoDB에서 인바운드 consultId만 추출 (M_OTB 제외)
+    LocalDateTime dayStart = targetDate.atStartOfDay();
+    LocalDateTime dayEnd = targetDate.plusDays(1).atStartOfDay();
+    List<String> inboundIds = mongoTemplate.find(
+            new Query(Criteria.where("consultedAt").gte(dayStart).lt(dayEnd)
+                    .and("category.code").not().regex("^M_OTB")),
+            Document.class, "consultation_summary"
+    ).stream()
+            .map(d -> String.valueOf(d.get("consultId")))
+            .collect(Collectors.toList());
+
+    if (inboundIds.isEmpty()) {
+      log.info("[KeywordRank] 인바운드 상담 없음 → 키워드 집계 스킵 (targetDate={})", targetDate);
+      return RepeatStatus.FINISHED;
+    }
+
+    // 1. ES 키워드 집계 (인바운드 consultId만)
     SearchResponse<Void> response = elasticsearchClient.search(s -> s
             .index("consult-keyword-index")
             .size(0)
             .query(q -> q
-                .range(r -> r
-                    .date(d -> d
-                        .field("date")
-                        .gte(startOfDay)
-                        .lte(endOfDay)
-                    )
-                )
+                .ids(ids -> ids.values(inboundIds))
             )
             .aggregations("total_keywords", a -> a
                 .terms(t -> t.field("customer.search").size(20))

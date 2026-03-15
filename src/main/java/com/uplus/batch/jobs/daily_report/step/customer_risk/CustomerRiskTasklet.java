@@ -108,6 +108,7 @@ public class CustomerRiskTasklet implements Tasklet {
         Aggregation aggregation = Aggregation.newAggregation(
                 Aggregation.match(
                         Criteria.where("consultedAt").gte(start).lte(end)
+                                .and("category.code").not().regex("^M_OTB")
                                 .and("riskFlags.0").exists(true)
                 ),
                 Aggregation.unwind("riskFlags"),

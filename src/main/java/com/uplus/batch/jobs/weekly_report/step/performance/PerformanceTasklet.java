@@ -76,10 +76,11 @@ public class PerformanceTasklet implements Tasklet {
         // 0) 상담사별 응대 품질 점수 조회 (agent report snapshot에서)
         Map<Long, Double> qualityScoreMap = loadQualityScores(startAt, endAt);
 
-        // 1) 전체 요약 집계
+        // 1) 전체 요약 집계 (인바운드만)
         Aggregation summaryAgg = Aggregation.newAggregation(
                 Aggregation.match(
                         Criteria.where("consultedAt").gte(startAt).lte(endAt)
+                                .and("category.code").not().regex("^M_OTB")
                 ),
                 Aggregation.group()
                         .count().as("totalCount")
@@ -99,10 +100,11 @@ public class PerformanceTasklet implements Tasklet {
         double avgDurationSec = getDoubleOrZero(summaryDoc, "avgDurationSec");
         double avgSatisfiedScore = getDoubleOrZero(summaryDoc, "avgSatisfiedScore");
 
-        // 2) 상담사별 성과 집계
+        // 2) 상담사별 성과 집계 (인바운드만)
         Aggregation agentAgg = Aggregation.newAggregation(
                 Aggregation.match(
                         Criteria.where("consultedAt").gte(startAt).lte(endAt)
+                                .and("category.code").not().regex("^M_OTB")
                 ),
                 Aggregation.group("agent._id")
                         .first("agent.name").as("agentName")
@@ -205,7 +207,8 @@ public class PerformanceTasklet implements Tasklet {
      */
     private List<Document> aggregateCategory(LocalDateTime startAt, LocalDateTime endAt) {
         Aggregation agg = Aggregation.newAggregation(
-                Aggregation.match(Criteria.where("consultedAt").gte(startAt).lte(endAt)),
+                Aggregation.match(Criteria.where("consultedAt").gte(startAt).lte(endAt)
+                        .and("category.code").not().regex("^M_OTB")),
                 Aggregation.group("category.large").count().as("count"),
                 Aggregation.sort(Sort.Direction.DESC, "count")
         );

@@ -1,6 +1,7 @@
 package com.uplus.batch.jobs.weekly_report.config;
 
 import com.uplus.batch.jobs.common.step.keyword.KeywordStatsTasklet;
+import com.uplus.batch.jobs.common.step.outbound.OutboundStatsTasklet;
 import com.uplus.batch.jobs.daily_report.step.quality_analysis.QualityAnalysisTasklet;
 import com.uplus.batch.jobs.weekly_report.step.performance.PerformanceTasklet;
 import com.uplus.batch.jobs.weekly_report.step.admin.WeeklySubscriptionStatsTasklet;
@@ -36,12 +37,13 @@ public class WeeklyReportJobConfig {
     private final WeeklySubscriptionStatsTasklet weeklySubscriptionStatsTasklet;
 
     @Bean
-    public Job weeklyAdminReportJob(Step weeklyPerformanceStep, Step weeklyQualityAnalysisStep) {
+    public Job weeklyAdminReportJob(Step weeklyPerformanceStep, Step weeklyQualityAnalysisStep, Step weeklyOutboundStatsStep) {
         return new JobBuilder("weeklyAdminReportJob", jobRepository)
                 .start(weeklyPerformanceStep)
                 .next(weeklyKeywordStatsStep())
                 .next(weeklySubscriptionStatsStep())
                 .next(weeklyQualityAnalysisStep)
+                .next(weeklyOutboundStatsStep)
                 .build();
     }
 
@@ -71,5 +73,12 @@ public class WeeklyReportJobConfig {
         return new StepBuilder("weeklyQualityAnalysisStep", jobRepository)
             .tasklet(qualityAnalysisTasklet, transactionManager)
             .build();
+    }
+
+    @Bean
+    public Step weeklyOutboundStatsStep(OutboundStatsTasklet outboundStatsTasklet) {
+        return new StepBuilder("weeklyOutboundStatsStep", jobRepository)
+                .tasklet(outboundStatsTasklet, transactionManager)
+                .build();
     }
 }
