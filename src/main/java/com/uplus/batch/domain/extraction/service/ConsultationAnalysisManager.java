@@ -91,7 +91,9 @@ public class ConsultationAnalysisManager {
 
                 // 4. 리스트 결과 해체 및 개별 저장 
                 List<AiExtractionResponse> extractionResults = extractionFuture.get();
-
+                if (extractionResults.size() != pairs.size()) {
+                    throw new RuntimeException("AI 응답 개수 불일치 (보낸 건: " + pairs.size() + ", 받은 건: " + extractionResults.size() + ")");
+                }
                 for (int i = 0; i < pairs.size(); i++) {
                     TaskPair pair = pairs.get(i);
                     
