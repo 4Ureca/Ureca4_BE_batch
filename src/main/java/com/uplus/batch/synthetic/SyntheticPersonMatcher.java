@@ -49,7 +49,9 @@ public class SyntheticPersonMatcher {
             String phone,
             String gradeCode,
             LocalDate birthDate,
-            String gender          // 'M' | 'F' | null
+            String gender,         // 'M' | 'F' | null
+            String mobilePlanName, // 현재 활성 모바일 상품명 (nullable)
+            String homePlanName    // 현재 활성 홈/인터넷 상품명 (nullable)
     ) {}
 
     // ─────────────────────────────────────────────────────────
@@ -81,8 +83,24 @@ public class SyntheticPersonMatcher {
 
     private void loadCustomers() {
         customers = jdbcTemplate.query(
-                "SELECT customer_id, name, customer_type, phone, grade_code, birth_date, gender " +
-                "FROM customers",
+                """
+                SELECT
+                    c.customer_id, c.name, c.customer_type, c.phone,
+                    c.grade_code, c.birth_date, c.gender,
+                    (SELECT pm.plan_name
+                     FROM customer_subscription_mobile csm
+                     JOIN product_mobile pm ON csm.mobile_code = pm.mobile_code
+                     WHERE csm.customer_id = c.customer_id
+                       AND csm.extinguish_at IS NULL
+                     LIMIT 1) AS mobile_plan_name,
+                    (SELECT ph.product_name
+                     FROM customer_subscription_home csh
+                     JOIN product_home ph ON csh.home_code = ph.home_code
+                     WHERE csh.customer_id = c.customer_id
+                       AND csh.extinguish_at IS NULL
+                     LIMIT 1) AS home_plan_name
+                FROM customers c
+                """,
                 (rs, rowNum) -> new CustomerInfo(
                         rs.getLong("customer_id"),
                         rs.getString("name"),
@@ -91,7 +109,9 @@ public class SyntheticPersonMatcher {
                         rs.getString("grade_code"),
                         rs.getDate("birth_date") != null
                                 ? rs.getDate("birth_date").toLocalDate() : null,
-                        rs.getString("gender")
+                        rs.getString("gender"),
+                        rs.getString("mobile_plan_name"),
+                        rs.getString("home_plan_name")
                 )
         );
     }

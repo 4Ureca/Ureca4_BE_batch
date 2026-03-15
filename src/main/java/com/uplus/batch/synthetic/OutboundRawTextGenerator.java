@@ -45,6 +45,20 @@ public class OutboundRawTextGenerator {
     private record Turn(String speaker, String text) {}
 
     /**
+     * 원문 개인화에 필요한 고객 컨텍스트.
+     * Factory가 DB에서 로드한 고객 정보를 이 형태로 전달한다.
+     *
+     * @param name           고객 이름 (예: "홍길동")
+     * @param mobilePlanName 현재 활성 모바일 상품명 (예: "5G 프리미어 에센셜", nullable)
+     * @param homePlanName   현재 활성 홈/인터넷 상품명 (예: "기가인터넷 1G", nullable)
+     */
+    public record CustomerContext(
+            String name,
+            String mobilePlanName,
+            String homePlanName
+    ) {}
+
+    /**
      * 아웃바운드 원문 생성 결과.
      * 모든 필드가 결정론적으로 설정되어 있으며, Factory는 이 값을 그대로 DB에 삽입한다.
      */
@@ -1365,14 +1379,17 @@ public class OutboundRawTextGenerator {
      * outbound_category code_name을 기준으로 상담 원문과 결과서를 생성한다.
      *
      * <p>Factory는 먼저 code_name을 분포에 따라 선택한 뒤 이 메서드를 호출한다.
+     * {@link CustomerContext}를 전달하면 고객 이름 및 구독 상품명이 원문에 반영된다.
      *
      * @param categoryType        상담 카테고리 유형 ("CHN" | "FEE" | "TRB")
      * @param outboundCategoryKey "CONVERTED" 또는 analysis_code outbound_category code_name
      *                            (COST | NO_NEED | SWITCH | CONSIDER | DISSATISFIED | OTHER)
      * @param random              난수 생성기
+     * @param ctx                 고객 컨텍스트 (이름, 모바일/홈 상품명)
      * @return 선택된 템플릿 기반 {@link OutboundTextResult}
      */
-    public OutboundTextResult generate(String categoryType, String outboundCategoryKey, Random random) {
+    public OutboundTextResult generate(String categoryType, String outboundCategoryKey,
+                                       Random random, CustomerContext ctx) {
         Map<String, List<OutboundTemplate>> map = switch (categoryType) {
             case "FEE" -> FEE_TEMPLATE_MAP;
             case "TRB" -> TRB_TEMPLATE_MAP;
@@ -1380,7 +1397,138 @@ public class OutboundRawTextGenerator {
         };
         List<OutboundTemplate> pool = map.getOrDefault(outboundCategoryKey, TEMPLATES);
         OutboundTemplate t = pool.get(random.nextInt(pool.size()));
-        return toResult(t);
+        List<Turn> personalizedTurns = personalize(t.turns(), categoryType, ctx);
+        return new OutboundTextResult(
+                serialize(personalizedTurns),
+                t.callResult(),
+                t.outboundCategory(),
+                t.complaintCategory(),
+                t.defenseCategory(),
+                t.iamIssue(),
+                t.iamAction()
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  개인화 로직
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 템플릿 대화를 고객 정보에 맞게 개인화한다.
+     *
+     * <p>두 단계로 처리된다:
+     * <ol>
+     *   <li>전체 발화: {@code "고객님"} → {@code "{name}님"} 치환</li>
+     *   <li>첫 번째 상담사 발화: 현재 구독 상품명을 핵심 문구에 삽입</li>
+     * </ol>
+     */
+    private List<Turn> personalize(List<Turn> turns, String categoryType, CustomerContext ctx) {
+        boolean firstAgent = true;
+        List<Turn> result = new ArrayList<>(turns.size());
+        for (Turn t : turns) {
+            // 1. 전체 발화에서 "고객님" → "{이름}님"
+            String text = t.text().replace("고객님", ctx.name() + "님");
+
+            // 2. 첫 번째 상담사 발화에만 상품명 삽입
+            if (firstAgent && "상담사".equals(t.speaker())) {
+                text = injectProduct(text, categoryType, ctx);
+                firstAgent = false;
+            }
+            result.add(new Turn(t.speaker(), text));
+        }
+        return result;
+    }
+
+    /**
+     * 첫 번째 상담사 발화 텍스트에 현재 구독 상품명을 자연스럽게 삽입한다.
+     *
+     * <p>카테고리별 우선 상품:
+     * <ul>
+     *   <li>CHN — 발화에 "인터넷" 포함 시 홈 상품 우선, 그 외 모바일 우선</li>
+     *   <li>FEE — 모바일 상품 우선 (요금제 불만이므로)</li>
+     *   <li>TRB — 홈 상품 우선 (인터넷/통화 품질 불만이므로)</li>
+     * </ul>
+     * 상품명이 없으면 원문을 그대로 반환한다.
+     */
+    private String injectProduct(String text, String categoryType, CustomerContext ctx) {
+        String mobile = ctx.mobilePlanName();
+        String home   = ctx.homePlanName();
+
+        // 카테고리 및 발화 내용을 기준으로 사용할 상품명 결정
+        final String p;
+        if ("FEE".equals(categoryType)) {
+            p = mobile != null ? mobile : home;
+        } else if ("TRB".equals(categoryType)) {
+            p = home != null ? home : mobile;
+        } else { // CHN
+            boolean hasHomeContext = text.contains("인터넷") || text.contains("이전 설치");
+            p = hasHomeContext ? (home != null ? home : mobile) : (mobile != null ? mobile : home);
+        }
+        if (p == null) return text;
+
+        // ── 약정 만료 / 재약정 관련 ────────────────────────────────────────
+        text = text.replace("약정 만료가 다가와",
+                "현재 이용 중이신 " + p + "의 약정 만료가 다가와");
+        text = text.replace("약정 만료를 앞두고",
+                "현재 이용 중이신 " + p + " 약정 만료를 앞두고");
+        text = text.replace("약정 만료 시점에",
+                "현재 이용 중이신 " + p + " 약정 만료 시점에");
+        text = text.replace("약정 만료 관련",
+                "현재 이용 중이신 " + p + " 약정 만료 관련");
+
+        // ── 해지 / 타사 이동 관련 ─────────────────────────────────────────
+        text = text.replace("타사 이동을 고려 중이시다는",
+                p + " 이용 중 타사 이동을 고려 중이시다는");
+        text = text.replace("타사 가입을 검토하셨다는",
+                p + " 이용 중 타사 가입을 검토하셨다는");
+        text = text.replace("타사와의 요금 비교를 고려 중이시라는",
+                p + " 이용 중 타사와의 요금 비교를 고려 중이시라는");
+        text = text.replace("해지 문의 관련하여",
+                p + " 해지 문의 관련하여");
+        text = text.replace("해지 문의가 있으셨다는",
+                p + " 해지 문의가 있으셨다는");
+        text = text.replace("해지 문의 이력이",
+                p + " 해지 문의 이력이");
+        text = text.replace("중도 해지 문의가",
+                p + " 중도 해지 문의가");
+
+        // ── 요금 / 사용량 관련 ────────────────────────────────────────────
+        text = text.replace("요금 부담 관련하여",
+                p + " 요금 부담 관련하여");
+        text = text.replace("요금 청구 내역을 분석하여",
+                p + " 요금 청구 내역을 분석하여");
+        text = text.replace("데이터 사용량을 분석한 결과,",
+                p + " 데이터 사용량을 분석한 결과,");
+        text = text.replace("요금 관련 불편을 겪고 계신다는",
+                p + " 요금 관련 불편을 겪고 계신다는");
+        text = text.replace("요금 관련 도움드리고자",
+                p + " 요금 관련 도움드리고자");
+        text = text.replace("요금 관련 안내드리고자",
+                p + " 요금 관련 안내드리고자");
+
+        // ── 품질 / 기술 불만 관련 (TRB / CHN 일부) ───────────────────────
+        text = text.replace("인터넷 품질 불편을 겪고 계신다는",
+                p + " 품질 불편을 겪고 계신다는");
+        text = text.replace("인터넷 품질 관련 불편을 겪고 계신다는",
+                p + " 품질 관련 불편을 겪고 계신다는");
+        text = text.replace("인터넷 품질 관련 불편이 있으셨다는",
+                p + " 품질 관련 불편이 있으셨다는");
+        text = text.replace("인터넷 속도 관련 불만이 있으셨다는",
+                p + " 속도 관련 불만이 있으셨다는");
+        text = text.replace("인터넷 속도 불만이 지속되고 계신다는",
+                p + " 속도 불만이 지속되고 계신다는");
+        text = text.replace("반복적인 인터넷 장애로",
+                "반복적인 " + p + " 장애로");
+        text = text.replace("인터넷 품질 불편으로 해지를 고려 중이시다는",
+                p + " 품질 불편으로 해지를 고려 중이시다는");
+        text = text.replace("인터넷 품질 불편으로 해지를 고려 중이시라는",
+                p + " 품질 불편으로 해지를 고려 중이시라는");
+        text = text.replace("통화 품질 불편을 겪고 계신다는",
+                p + " 품질 불편을 겪고 계신다는");
+        text = text.replace("서비스 불편 관련하여 도움드리고자",
+                p + " 서비스 불편 관련하여 도움드리고자");
+
+        return text;
     }
 
     /**
@@ -1389,18 +1537,6 @@ public class OutboundRawTextGenerator {
      */
     public Map<String, List<OutboundTemplate>> getTemplateMap() {
         return Collections.unmodifiableMap(TEMPLATE_MAP);
-    }
-
-    private OutboundTextResult toResult(OutboundTemplate t) {
-        return new OutboundTextResult(
-                serialize(t.turns()),
-                t.callResult(),
-                t.outboundCategory(),
-                t.complaintCategory(),
-                t.defenseCategory(),
-                t.iamIssue(),
-                t.iamAction()
-        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
