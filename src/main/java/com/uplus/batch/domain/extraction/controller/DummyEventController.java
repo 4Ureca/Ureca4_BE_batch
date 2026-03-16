@@ -96,8 +96,8 @@ public class DummyEventController {
             addManual(batchArgs, "M_OTB_04", "[안내] 연체 납부 독려 및 정지 예방", "미납 고객 대상 서비스 중단 방지 및 유연한 납부 방식 제안", "\"서비스 정지를 방지하기 위해 미납된 요금의 빠른 납부와 분할 납부 방법을 안내해 드리고자 합니다.\"", "현재 총 미납액 상세 내역 고지 및 가상계좌/즉시 수납 채널 정보 제공");
             addManual(batchArgs, "M_OTB_05", "[전략] 윈백(Win-back) 복귀 유도", "타사 이탈 고객 대상 재가입 특별 혜택 강조 및 복귀 제안", "\"U+를 다시 이용해 주시면 신규 가입 이상의 특별한 복귀 혜택과 결합 할인을 적용해 드리겠습니다.\"", "타사 이용 위약금 보전 혜택 및 유무선 결합 재구성 시 예상 할인 총액 안내");
             addManual(batchArgs, "M_OTB_06", "[안내] 개통 해피콜 및 초기 품질 확인", "설치/개통 직후 초기 품질 확인 및 추가 니즈 발굴", "\"기사님 방문 설치는 만족스러우셨나요? 이용 초기 궁금하신 점이나 불편한 점은 없으신지요?\"", "설치 완료 전산 리포트 기반 품질 측정값 안내 및 초기 설정 가이드 SMS 발송 사실 고지");
-            String sql = "INSERT INTO manuals (category_code, title, content, is_active, emp_id, created_by, created_at, updated_at) " +
-                         "VALUES (?, ?, ?, 1, 1, 2, NOW(), NOW())";
+            String sql = "INSERT INTO manuals (category_code, title, content, is_active, emp_id, created_at, updated_at) " +
+                         "VALUES (?, ?, ?, 1, 1, NOW(), NOW())";
 
             jdbcTemplate.batchUpdate(sql, batchArgs);
 
