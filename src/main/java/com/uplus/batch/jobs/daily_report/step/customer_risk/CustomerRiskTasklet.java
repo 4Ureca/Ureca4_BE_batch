@@ -54,10 +54,9 @@ public class CustomerRiskTasklet implements Tasklet {
         LocalDateTime start = targetDate.atStartOfDay();
         LocalDateTime end = targetDate.atTime(23, 59, 59);
 
-        log.info("[CustomerRisk Step] {} 고객 특이사항 집계 시작", targetDate);
+        log.info("[CustomerRisk] {} 집계 시작", targetDate);
 
         Map<String, String> activeRiskTypes = loadActiveRiskTypes();
-        log.info("[CustomerRisk Step] 활성 위험유형 {}종: {}", activeRiskTypes.size(), activeRiskTypes.keySet());
 
         Map<String, Integer> todayCounts = aggregateRiskFlags(start, end, activeRiskTypes.keySet());
 
@@ -76,7 +75,8 @@ public class CustomerRiskTasklet implements Tasklet {
                 .append("excessiveCompensation", result.getExcessiveCompensation())
                 .append("repeatedComplaint", result.getRepeatedComplaint())
                 .append("phishingVictim", result.getPhishingVictim())
-                .append("churnRisk", result.getChurnRisk());
+                .append("churnRisk", result.getChurnRisk())
+                .append("totalRiskCount", result.getTotalRiskCount());
 
         Query upsertQuery = new Query(Criteria.where("startAt").is(start));
         Update update = new Update()
@@ -87,16 +87,7 @@ public class CustomerRiskTasklet implements Tasklet {
 
         mongoTemplate.upsert(upsertQuery, update, "daily_report_snapshot");
 
-        log.info("[CustomerRisk Step] {} 집계 완료 - 총 위험:{}건",
-                targetDate, result.getTotalRiskCount());
-        log.info("[CustomerRisk Step]   사기 의심 (FRAUD): {}건", result.getFraudSuspect());
-        log.info("[CustomerRisk Step]   악성 민원 (ABUSE): {}건", result.getMaliciousComplaint());
-        log.info("[CustomerRisk Step]   정책 악용 (POLICY): {}건", result.getPolicyAbuse());
-        log.info("[CustomerRisk Step]   과도한 보상 요구 (COMP): {}건", result.getExcessiveCompensation());
-        log.info("[CustomerRisk Step]   반복 민원 (REPEAT): {}건", result.getRepeatedComplaint());
-        log.info("[CustomerRisk Step]   피싱 피해 (PHISHING): {}건", result.getPhishingVictim());
-        log.info("[CustomerRisk Step]   해지 위험 (CHURN): {}건", result.getChurnRisk());
-
+        log.info("[CustomerRisk] {} 집계 완료", targetDate);
         return RepeatStatus.FINISHED;
     }
 
@@ -120,7 +111,7 @@ public class CustomerRiskTasklet implements Tasklet {
                                 .and("riskFlags.0").exists(true)
                 ),
                 Aggregation.unwind("riskFlags"),
-                Aggregation.group("riskFlags").count().as("count"),
+                Aggregation.group("riskFlags.riskType").count().as("count"),
                 Aggregation.sort(Sort.Direction.DESC, "count")
         );
 
@@ -131,7 +122,9 @@ public class CustomerRiskTasklet implements Tasklet {
         activeTypeCodes.forEach(code -> counts.put(code, 0));
 
         for (Document doc : results.getMappedResults()) {
-            String typeCode = doc.getString("_id");
+            Object idObj = doc.get("_id");
+            if (!(idObj instanceof String)) continue;
+            String typeCode = (String) idObj;
             int count = doc.getInteger("count", 0);
             if (activeTypeCodes.contains(typeCode)) {
                 counts.put(typeCode, count);

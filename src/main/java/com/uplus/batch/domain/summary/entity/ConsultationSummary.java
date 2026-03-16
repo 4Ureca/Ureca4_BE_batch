@@ -35,15 +35,21 @@ public class ConsultationSummary {
   private Category category;
   private Iam iam;
   private Summary summary;
-  private List<String> riskFlags;
+  private List<RiskFlag> riskFlags;
   private Customer customer;
   private Cancellation cancellation;
   private List<ResultProducts> resultProducts;
   private LocalDateTime createdAt;
+  /** 데이터 출처 식별자. 합성 데이터는 "SYNTHETIC", 실 운영 데이터는 null. */
+  private String source;
 
   @Indexed(name = "idx_searchIndexed")
   private Boolean searchIndexed;
   private LocalDateTime searchIndexedAt;
+
+  @Indexed(name = "idx_keywordIndexed")
+  private Boolean keywordIndexed;
+  private LocalDateTime keywordIndexedAt;
 
   // ================= Embedded =================
 
@@ -87,6 +93,12 @@ public class ConsultationSummary {
     private String gender;
     private String grade;
     private Double satisfiedScore;
+  }
+
+  @Getter @Builder @NoArgsConstructor @AllArgsConstructor
+  public static class RiskFlag {
+    private String riskType;
+    private String riskLevel;
   }
 
   @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor

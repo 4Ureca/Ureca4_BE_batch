@@ -23,3 +23,4 @@ logging:
   level:
     org.springframework.jdbc: DEBUG
     com.zaxxer.hikari: DEBUG
+    com.uplus.batch: DEBUG

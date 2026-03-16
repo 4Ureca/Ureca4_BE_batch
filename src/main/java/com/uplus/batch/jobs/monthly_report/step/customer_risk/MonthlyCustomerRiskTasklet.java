@@ -55,18 +55,15 @@ public class MonthlyCustomerRiskTasklet implements Tasklet {
             endAt = lastMonth.withDayOfMonth(lastMonth.lengthOfMonth()).atTime(23, 59, 59);
         }
 
-        log.info("[MonthlyCustomerRisk] 월별 고객 특이사항 집계 시작: {} ~ {}", startAt, endAt);
+        log.info("[MonthlyCustomerRisk] {} ~ {} 집계 시작", startAt, endAt);
 
         // 1. MySQL에서 활성 위험유형 로드
         Map<String, String> activeRiskTypes = loadActiveRiskTypes();
-        log.info("[MonthlyCustomerRisk] 활성 위험유형 {}종: {}", activeRiskTypes.size(), activeRiskTypes.keySet());
 
         // 2. MongoDB에서 riskFlags 집계
         Map<String, Integer> counts = aggregateRiskFlags(startAt, endAt, activeRiskTypes.keySet());
 
         int totalRisk = counts.values().stream().mapToInt(Integer::intValue).sum();
-        log.info("[MonthlyCustomerRisk] 집계 완료 — 총 위험: {}건", totalRisk);
-        counts.forEach((code, count) -> log.info("[MonthlyCustomerRisk]   {} : {}건", code, count));
 
         // 3. monthly_report_snapshot에 customerRiskAnalysis upsert
         Document riskDoc = new Document()
@@ -88,8 +85,7 @@ public class MonthlyCustomerRiskTasklet implements Tasklet {
 
         mongoTemplate.upsert(upsertQuery, update, "monthly_report_snapshot");
 
-        log.info("[MonthlyCustomerRisk] monthly_report_snapshot upsert 완료");
-
+        log.info("[MonthlyCustomerRisk] {} ~ {} 집계 완료", startAt, endAt);
         return RepeatStatus.FINISHED;
     }
 
@@ -112,7 +108,7 @@ public class MonthlyCustomerRiskTasklet implements Tasklet {
                                 .and("riskFlags.0").exists(true)
                 ),
                 Aggregation.unwind("riskFlags"),
-                Aggregation.group("riskFlags").count().as("count"),
+                Aggregation.group("riskFlags.riskType").count().as("count"),
                 Aggregation.sort(Sort.Direction.DESC, "count")
         );
 
@@ -123,7 +119,9 @@ public class MonthlyCustomerRiskTasklet implements Tasklet {
         activeTypeCodes.forEach(code -> counts.put(code, 0));
 
         for (Document doc : results.getMappedResults()) {
-            String typeCode = doc.getString("_id");
+            Object idObj = doc.get("_id");
+            if (!(idObj instanceof String)) continue;
+            String typeCode = (String) idObj;
             int count = doc.getInteger("count", 0);
             if (activeTypeCodes.contains(typeCode)) {
                 counts.put(typeCode, count);

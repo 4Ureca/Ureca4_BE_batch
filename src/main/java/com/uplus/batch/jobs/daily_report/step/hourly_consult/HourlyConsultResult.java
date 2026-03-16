@@ -10,7 +10,6 @@ import java.util.List;
  *
  * daily_report_snapshot에 저장되는 구조:
  * - timeSlotTrend[]: 슬롯별 카테고리·키워드 분석
- * - keywordSummary: 전체 키워드 분석 + 고객 유형별
  */
 @Getter
 @Builder
@@ -23,7 +22,6 @@ public class HourlyConsultResult implements Serializable {
     private int totalConsultCount;
     private double avgDurationMinutes;
     private List<TimeSlotResult> timeSlotTrend;
-    private KeywordSummary keywordSummary;
 
     // ── 시간대별 집계 ──
 
@@ -91,27 +89,4 @@ public class HourlyConsultResult implements Serializable {
         private long count;
     }
 
-    // ── 전체 키워드 분석 ──
-
-    @Getter
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class KeywordSummary implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private List<TopKeyword> topKeywords;
-        private List<CustomerTypeKeyword> byCustomerType;
-    }
-
-    @Getter
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CustomerTypeKeyword implements Serializable {
-        private static final long serialVersionUID = 1L;
-
-        private String customerType;      // "VVIP", "VIP", "DIAMOND" 등
-        private List<String> keywords;
-    }
 }

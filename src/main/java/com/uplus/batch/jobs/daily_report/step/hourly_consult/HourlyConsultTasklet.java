@@ -1,8 +1,7 @@
 package com.uplus.batch.jobs.daily_report.step.hourly_consult;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.uplus.batch.common.elasticsearch.ElasticsearchAnalyzeService;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.Document;
 import org.springframework.batch.core.StepContribution;
@@ -18,7 +17,6 @@ import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -42,8 +40,7 @@ import java.util.stream.Collectors;
 public class HourlyConsultTasklet implements Tasklet {
 
     private final MongoTemplate mongoTemplate;
-    private final ElasticsearchAnalyzeService analyzeService; // [변경] ES Terms → Nori analyze
-    private final JdbcTemplate jdbcTemplate;                  // [추가] MySQL 원문 조회용
+    private final ElasticsearchClient elasticsearchClient;
     private final String targetDateParam;
     private final String targetSlotParam;
 
@@ -74,13 +71,11 @@ public class HourlyConsultTasklet implements Tasklet {
 
     public HourlyConsultTasklet(
             MongoTemplate mongoTemplate,
-            ElasticsearchAnalyzeService analyzeService,
-            JdbcTemplate jdbcTemplate,
+            ElasticsearchClient elasticsearchClient,
             @Value("#{jobParameters['targetDate'] ?: null}") String targetDateParam,
             @Value("#{jobParameters['slot'] ?: null}") String targetSlotParam) {
         this.mongoTemplate = mongoTemplate;
-        this.analyzeService = analyzeService;
-        this.jdbcTemplate = jdbcTemplate;
+        this.elasticsearchClient = elasticsearchClient;
         this.targetDateParam = targetDateParam;
         this.targetSlotParam = targetSlotParam;
     }
@@ -124,11 +119,6 @@ public class HourlyConsultTasklet implements Tasklet {
         List<HourlyConsultResult.CategoryBreakdown> categoryBreakdown = buildCategoryBreakdown(
                 categoryDocs, slotTotalCount);
 
-        log.info("[HourlyConsult] 슬롯 {} — 총 {}건, 평균 {}분, 카테고리 {}종",
-                targetSlot, slotTotalCount,
-                Math.round(slotAvgDurationMin * 10.0) / 10.0,
-                categoryBreakdown.size());
-
         // 2) [변경] 키워드 집계: MySQL 원문 → Nori analyze (유진님 방식)
         Map<String, Long> currentKeywords = aggregateKeywordsFromRawText(slotStart, slotEnd);
 
@@ -137,18 +127,6 @@ public class HourlyConsultTasklet implements Tasklet {
                 targetDate.minusDays(1), targetSlot);
         HourlyConsultResult.KeywordAnalysis keywordAnalysis = buildKeywordAnalysis(
                 currentKeywords, previousKeywords);
-
-        log.info("[HourlyConsult] 슬롯 {} — 키워드 {}개, 신규 {}개",
-                targetSlot,
-                keywordAnalysis.getTopKeywords().size(),
-                keywordAnalysis.getNewKeywords().size());
-
-        // 4) 전체 키워드 분석 (keywordSummary) — [변경] 하루 전체 원문 기준
-        Map<String, Long> dailyKeywords = aggregateKeywordsFromRawText(
-                dayStart.withHour(9), dayEnd.withHour(18));
-        Map<String, Long> prevDailyKeywords = loadDailyKeywords(targetDate.minusDays(1));
-        HourlyConsultResult.KeywordSummary keywordSummary = buildKeywordSummary(
-                dailyKeywords, prevDailyKeywords, dayStart, dayEnd);
 
         // 5) 슬롯 결과 조립
         HourlyConsultResult.TimeSlotResult slotResult = HourlyConsultResult.TimeSlotResult.builder()
@@ -173,7 +151,6 @@ public class HourlyConsultTasklet implements Tasklet {
                 .totalConsultCount(totalCount)
                 .avgDurationMinutes(totalAvgMin)
                 .timeSlotTrend(allSlots)
-                .keywordSummary(keywordSummary)
                 .build();
 
         contribution.getStepExecution()
@@ -184,9 +161,7 @@ public class HourlyConsultTasklet implements Tasklet {
         // 8) daily_report_snapshot upsert
         upsertSnapshot(dayStart, dayEnd, result);
 
-        log.info("[HourlyConsult] {} 슬롯 {} 집계 완료 — 전체 {}건",
-                targetDate, targetSlot, totalCount);
-
+        log.info("[HourlyConsult] {} 슬롯 {} 집계 완료", targetDate, targetSlot);
         return RepeatStatus.FINISHED;
     }
 
@@ -254,68 +229,44 @@ public class HourlyConsultTasklet implements Tasklet {
     }
 
     // ═══════════════════════════════════════════════════════
-    //  [변경] 키워드 집계: MySQL 원문 → Nori analyze
-    //  기존: ES Terms Aggregation (summary.keywords — 해지방어 20~30%만 커버)
-    //  변경: 유진님 방식과 동일 — consultation_raw_texts 고객 발화 → ES _analyze API
-    //         전체 상담 100% 커버리지 확보
+    //  [변경] 키워드 집계: ES consult-keyword-index 직접 집계
+    //  기존: MySQL 원문 → ES _analyze API × N건
+    //  변경: ES terms aggregation 1회 (KeywordRankTasklet과 동일 패턴)
     // ═══════════════════════════════════════════════════════
 
     private Map<String, Long> aggregateKeywordsFromRawText(
             LocalDateTime start, LocalDateTime end) throws Exception {
 
-        // MySQL에서 해당 시간대 원문 조회
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT rt.raw_text_json, cu.grade_code
-                FROM consultation_results cr
-                JOIN consultation_raw_texts rt ON cr.consult_id = rt.consult_id
-                JOIN customers cu ON cr.customer_id = cu.customer_id
-                WHERE cr.created_at >= ? AND cr.created_at < ?
-                ORDER BY cr.consult_id
-                """, start, end);
+        String startStr = start.toString();
+        String endStr = end.toString();
+
+        SearchResponse<Void> response = elasticsearchClient.search(s -> s
+                .index("consult-keyword-index")
+                .size(0)
+                .query(q -> q
+                    .range(r -> r
+                        .date(d -> d
+                            .field("date")
+                            .gte(startStr)
+                            .lt(endStr)
+                        )
+                    )
+                )
+                .aggregations("slot_keywords", a -> a
+                    .terms(t -> t.field("customer.search").size(TOP_KEYWORD_SIZE * 2))
+                ),
+            Void.class
+        );
 
         Map<String, Long> keywordCount = new LinkedHashMap<>();
 
-        for (Map<String, Object> row : rows) {
-            String rawJson = (String) row.get("raw_text_json");
-            String content = extractCustomerText(rawJson);
-            if (content == null || content.length() < 2) continue;
+        response.aggregations().get("slot_keywords").sterms()
+            .buckets().array().stream()
+            .filter(b -> !"null".equals(b.key().stringValue())
+                         && b.key().stringValue().length() > 1)
+            .forEach(b -> keywordCount.put(b.key().stringValue(), b.docCount()));
 
-            // 유진님의 ElasticsearchAnalyzeService 그대로 사용
-            List<String> tokens = analyzeService.analyze(content);
-            for (String token : tokens) {
-                keywordCount.merge(token, 1L, Long::sum);
-            }
-        }
-
-        // 빈도 내림차순 정렬 후 상위만 반환
-        return keywordCount.entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                .limit((long) TOP_KEYWORD_SIZE * 2)
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey, Map.Entry::getValue,
-                        (e1, e2) -> e1, LinkedHashMap::new));
-    }
-
-    /**
-     * raw_text_json에서 고객 발화만 추출
-     * 유진님 ConsultationReaderConfig의 rowMapper 로직과 동일
-     */
-    private String extractCustomerText(String rawJson) {
-        if (rawJson == null || rawJson.isBlank()) return null;
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode array = mapper.readTree(rawJson);
-            StringBuilder sb = new StringBuilder();
-            for (JsonNode node : array) {
-                if (!"고객".equals(node.path("speaker").asText(""))) continue;
-                String msg = node.path("message").asText("");
-                if (msg.length() >= 2) sb.append(msg).append(" ");
-            }
-            return sb.length() > 0 ? sb.toString() : null;
-        } catch (Exception e) {
-            log.warn("[HourlyConsult] raw_text_json 파싱 실패: {}", e.getMessage());
-            return null;
-        }
+        return keywordCount;
     }
 
     // ═══════════════════════════════════════════════════════
@@ -392,113 +343,6 @@ public class HourlyConsultTasklet implements Tasklet {
         return result;
     }
 
-    private Map<String, Long> loadDailyKeywords(LocalDate prevDate) {
-        Map<String, Long> result = new LinkedHashMap<>();
-        LocalDateTime prevStart = prevDate.atStartOfDay();
-        Query query = new Query(Criteria.where("startAt").is(prevStart));
-        Document snapshot = mongoTemplate.findOne(query, Document.class, SNAPSHOT_COLLECTION);
-        if (snapshot == null) return result;
-
-        Document kwSummary = snapshot.get("keywordSummary", Document.class);
-        if (kwSummary == null) return result;
-
-        List<Document> topKws = kwSummary.getList("topKeywords", Document.class);
-        if (topKws != null) {
-            for (Document kw : topKws) {
-                result.put(kw.getString("keyword"),
-                        kw.get("count") instanceof Number
-                                ? ((Number) kw.get("count")).longValue() : 0L);
-            }
-        }
-        return result;
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  전체 키워드 분석 (keywordSummary)
-    // ═══════════════════════════════════════════════════════
-
-    private HourlyConsultResult.KeywordSummary buildKeywordSummary(
-            Map<String, Long> dailyKeywords,
-            Map<String, Long> prevDailyKeywords,
-            LocalDateTime dayStart, LocalDateTime dayEnd) {
-
-        List<HourlyConsultResult.TopKeyword> topKeywords = new ArrayList<>();
-        int rank = 1;
-        for (Map.Entry<String, Long> entry : dailyKeywords.entrySet()) {
-            if (rank > TOP_KEYWORD_SIZE) break;
-            long prevCount = prevDailyKeywords.getOrDefault(entry.getKey(), 0L);
-            double changeRate = prevCount > 0
-                    ? Math.round(((entry.getValue() - prevCount) * 100.0 / prevCount) * 10.0) / 10.0
-                    : 0;
-            topKeywords.add(HourlyConsultResult.TopKeyword.builder()
-                    .keyword(entry.getKey()).count(entry.getValue())
-                    .rank(rank++).changeRate(changeRate)
-                    .build());
-        }
-
-        // [변경] 고객 유형별 키워드도 MySQL 원문 기반으로 집계
-        List<HourlyConsultResult.CustomerTypeKeyword> byCustomerType =
-                aggregateKeywordsByCustomerTypeFromRawText(dayStart, dayEnd);
-
-        return HourlyConsultResult.KeywordSummary.builder()
-                .topKeywords(topKeywords)
-                .byCustomerType(byCustomerType)
-                .build();
-    }
-
-    /**
-     * [변경] 고객 유형별 키워드 집계
-     * 기존: MongoDB aggregation (summary.keywords 기반 — 해지방어만)
-     * 변경: MySQL 원문 → Nori analyze → grade_code별 집계 (전체 커버)
-     */
-    private List<HourlyConsultResult.CustomerTypeKeyword> aggregateKeywordsByCustomerTypeFromRawText(
-            LocalDateTime start, LocalDateTime end) {
-
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT rt.raw_text_json, cu.grade_code
-                FROM consultation_results cr
-                JOIN consultation_raw_texts rt ON cr.consult_id = rt.consult_id
-                JOIN customers cu ON cr.customer_id = cu.customer_id
-                WHERE cr.created_at >= ? AND cr.created_at < ?
-                ORDER BY cr.consult_id
-                """, start, end);
-
-        // grade_code별 키워드 빈도 집계 (유진님의 KeywordAggregator 방식)
-        Map<String, Map<String, Long>> byGrade = new LinkedHashMap<>();
-
-        for (Map<String, Object> row : rows) {
-            String rawJson = (String) row.get("raw_text_json");
-            String gradeCode = (String) row.get("grade_code");
-            String content = extractCustomerText(rawJson);
-            if (content == null || content.length() < 2 || gradeCode == null) continue;
-
-            try {
-                List<String> tokens = analyzeService.analyze(content);
-                Map<String, Long> gradeMap = byGrade.computeIfAbsent(gradeCode, k -> new HashMap<>());
-                for (String token : tokens) {
-                    gradeMap.merge(token, 1L, Long::sum);
-                }
-            } catch (Exception e) {
-                log.warn("[HourlyConsult] gradeCode={} 키워드 분석 실패: {}", gradeCode, e.getMessage());
-            }
-        }
-
-        // grade별 상위 6개 키워드만 추출 (기존 limit과 동일)
-        return byGrade.entrySet().stream()
-                .sorted(Map.Entry.comparingByKey())
-                .map(entry -> {
-                    List<String> keywords = entry.getValue().entrySet().stream()
-                            .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
-                            .limit(6)
-                            .map(Map.Entry::getKey)
-                            .collect(Collectors.toList());
-                    return HourlyConsultResult.CustomerTypeKeyword.builder()
-                            .customerType(entry.getKey())
-                            .keywords(keywords)
-                            .build();
-                })
-                .collect(Collectors.toList());
-    }
 
     // ═══════════════════════════════════════════════════════
     //  기존 슬롯 합산 (변경 없음)
@@ -604,23 +448,11 @@ public class HourlyConsultTasklet implements Tasklet {
                     .append("keywordAnalysis", kwDoc);
         }).collect(Collectors.toList());
 
-        Document kwSummaryDoc = new Document();
-        kwSummaryDoc.append("topKeywords", result.getKeywordSummary().getTopKeywords().stream()
-                .map(k -> new Document("keyword", k.getKeyword()).append("count", k.getCount())
-                        .append("rank", k.getRank()).append("changeRate", k.getChangeRate()))
-                .collect(Collectors.toList()));
-        kwSummaryDoc.append("byCustomerType", result.getKeywordSummary().getByCustomerType().stream()
-                .map(ct -> new Document("customerType", ct.getCustomerType())
-                        .append("keywords", ct.getKeywords()))
-                .collect(Collectors.toList()));
 
         Query upsertQuery = new Query(Criteria.where("startAt").is(dayStart));
         Update update = new Update()
                 .set("startAt", dayStart).set("endAt", dayEnd)
-                .set("totalConsultCount", result.getTotalConsultCount())
-                .set("avgDurationMinutes", result.getAvgDurationMinutes())
                 .set("timeSlotTrend", trendDocs)
-                .set("keywordSummary", kwSummaryDoc)
                 .setOnInsert("createdAt", LocalDateTime.now());
 
         mongoTemplate.upsert(upsertQuery, update, SNAPSHOT_COLLECTION);

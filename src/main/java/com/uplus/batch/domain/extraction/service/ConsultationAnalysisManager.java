@@ -1,10 +1,10 @@
 package com.uplus.batch.domain.extraction.service;
 
 import java.util.*;
-import java.util.concurrent.*; // 🚀 TimeUnit, Executor, CompletionException 위해 추가
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
-import org.springframework.beans.factory.annotation.Qualifier; // 🚀 추가
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,12 +41,12 @@ public class ConsultationAnalysisManager {
     public void processIntegratedBundledTasks(List<TaskPair> taskPairs) {
         if (taskPairs == null || taskPairs.isEmpty()) return;
 
-        /* [STEP 1] 모든 태스크 상태 선점 (DB 락 방지 및 상태 처리) */
+        // [STEP 1] 분석 태스크 상태 선점 및 초기 저장
         taskPairs.forEach(pair -> { pair.summaryTask().start(); pair.scoringTask().start(); });
         resultEventRepository.saveAll(taskPairs.stream().map(TaskPair::summaryTask).toList());
         excellentEventRepository.saveAll(taskPairs.stream().map(TaskPair::scoringTask).toList());
 
-        /* [STEP 2] 성격별 그룹화 및 프롬프트 코드 구성 */
+        // [STEP 2] 카테고리별 그룹화 및 분석 코드 구성
         Map<String, List<TaskPair>> groups = taskPairs.stream()
                 .collect(Collectors.groupingBy(pair -> getGroupType(pair.summaryTask().getCategoryCode())));
         Map<String, String> validCodes = getAnalysisCodesFromDb();
@@ -55,21 +55,23 @@ public class ConsultationAnalysisManager {
             try {
                 log.info("[Batch] {} 그룹 분석 시작 ({}건)", groupType, pairs.size());
 
-                List<ConsultationRawText> rawDataList = pairs.stream()
-                        .map(p -> rawTextRepository.findByConsultId(p.summaryTask().getConsultId())
-                                .orElseThrow(() -> new RuntimeException("원문 없음")))
-                        .toList();
+                // [STEP 3] 원문 데이터 벌크 조회 및 전처리(절삭)
+                List<Long> consultIds = pairs.stream().map(p -> p.summaryTask().getConsultId()).toList();
+                Map<Long, ConsultationRawText> rawDataMap = rawTextRepository.findAllByConsultIdIn(consultIds)
+                        .stream().collect(Collectors.toMap(ConsultationRawText::getConsultId, r -> r));
 
                 String manualContent = manualRepository.findByCategoryCodeAndIsActiveTrue(pairs.get(0).summaryTask().getCategoryCode())
                         .map(Manual::getContent).orElse("기본 매뉴얼");
                 
-                /* [Pre-Process] 글자 수 절삭 (만 자 제한) */
-                List<String> processedRawTexts = rawDataList.stream()
-                        .map(ConsultationRawText::getRawTextJson)
-                        .map(text -> (text != null && text.length() > 10000) ? text.substring(0, 10000) + "..." : text)
-                        .toList();
+                List<String> processedRawTexts = pairs.stream()
+                        .map(p -> {
+                            ConsultationRawText raw = rawDataMap.get(p.summaryTask().getConsultId());
+                            if (raw == null) throw new RuntimeException("원문 데이터 부재: " + p.summaryTask().getConsultId());
+                            String text = raw.getRawTextJson();
+                            return (text != null && text.length() > 10000) ? text.substring(0, 10000) + "..." : text;
+                        }).toList();
                 
-                /* [STEP 3] AI 비동기 실행 (Executor 적용 + 절삭 데이터 전달) */
+                // [STEP 4] AI 비동기 실행 (요약 번들 및 개별 채점)
                 CompletableFuture<List<AiExtractionResponse>> extractionFuture = CompletableFuture.supplyAsync(() ->
                         geminiExtractor.extractBatch(processedRawTexts, groupType, validCodes), geminiTaskExecutor
                 );
@@ -85,28 +87,21 @@ public class ConsultationAnalysisManager {
                                 })
                         ).toList();
 
-                /* [STEP 4] 결과 수집 (3분 타임아웃 적용) */
+                // [STEP 5] AI 응답 결과 수집 및 검증
                 List<AiExtractionResponse> extractionResults;
                 try {
                     extractionResults = extractionFuture.orTimeout(180, TimeUnit.SECONDS).join();
                 } catch (Exception e) {
-                    throw new RuntimeException("AI 요약 응답 시간 초과(3분) 또는 통신 오류");
+                    throw new RuntimeException("AI 요약 응답 시간 초과(3분)");
                 }
 
-                if (extractionResults.size() != pairs.size()) {
-                    throw new RuntimeException("AI 응답 개수 불일치");
-                }
+                if (extractionResults.size() != pairs.size()) throw new RuntimeException("AI 응답 개수 불일치");
 
-                /* [STEP 5] 개별 저장 루프 (개별 채점 타임아웃 1분 적용) */
+                // [STEP 6] 데이터 저장 및 태스크 완료 처리
                 for (int i = 0; i < pairs.size(); i++) {
                     TaskPair pair = pairs.get(i);
-                    Long cId = pair.summaryTask().getConsultId();
-
                     try {
-                        // 개별 채점도 무한 대기 방지를 위해 60초 타임아웃
-                        QualityScoringResponse scoreRes = scoringFutures.get(i)
-                                .orTimeout(60, TimeUnit.SECONDS)
-                                .join();
+                        QualityScoringResponse scoreRes = scoringFutures.get(i).orTimeout(60, TimeUnit.SECONDS).join();
 
                         if (scoreRes == null) { 
                             pair.summaryTask().fail("채점 분석 실패");
@@ -114,21 +109,19 @@ public class ConsultationAnalysisManager {
                             continue; 
                         }
 
-                        saveExtraction(cId, extractionResults.get(i));
+                        saveExtraction(pair.summaryTask().getConsultId(), extractionResults.get(i));
                         saveEvaluation(pair.scoringTask().getConsultId(), scoreRes);
-
                         pair.summaryTask().complete();
                         pair.scoringTask().complete();
 
                     } catch (Exception e) {
-                        pair.summaryTask().fail("처리 중 오류/시간초과: " + truncate(e.getMessage()));
-                        pair.scoringTask().fail("처리 중 오류/시간초과: " + truncate(e.getMessage()));
+                        pair.summaryTask().fail("저장/시간초과 오류: " + truncate(e.getMessage()));
+                        pair.scoringTask().fail("저장/시간초과 오류: " + truncate(e.getMessage()));
                     }
                 }
 
             } catch (Exception e) {
-                /* [STEP 6] 그룹 치명적 에러: 번들 요약 실패 시 해당 그룹 전원 실패 처리 */
-                log.error("[Group Error] {} 실패: {}", groupType, e.getMessage());
+                log.error("[Group Error] {} 분석 실패: {}", groupType, e.getMessage());
                 pairs.forEach(p -> {
                     p.summaryTask().fail("번들링 실패: " + truncate(e.getMessage()));
                     p.scoringTask().fail("번들링 실패: " + truncate(e.getMessage()));
@@ -136,7 +129,7 @@ public class ConsultationAnalysisManager {
             }
         });
 
-        /* [STEP 7] 최종 상태 DB 동기화 */
+        // [STEP 7] 최종 태스크 상태 DB 동기화
         resultEventRepository.saveAll(taskPairs.stream().map(TaskPair::summaryTask).toList());
         excellentEventRepository.saveAll(taskPairs.stream().map(TaskPair::scoringTask).toList());
     }
@@ -149,33 +142,19 @@ public class ConsultationAnalysisManager {
 
     private Map<String, String> getAnalysisCodesFromDb() {
         List<String> targets = List.of("complaint_category", "defense_category", "outbound_category");
-        
         return analysisCodeRepository.findAllByClassificationIn(targets).stream()
-                .collect(Collectors.groupingBy(
-                        AnalysisCode::getClassification,
-                        Collectors.mapping(
-                            code -> code.getCodeName() + "(" + code.getDescription() + ")", 
-                            Collectors.joining(", ")
-                        )
-                ));
+                .collect(Collectors.groupingBy(AnalysisCode::getClassification,
+                        Collectors.mapping(code -> code.getCodeName() + "(" + code.getDescription() + ")", Collectors.joining(", "))));
     }
 
     private void saveExtraction(Long id, AiExtractionResponse res) throws Exception {
-        ConsultationExtraction entity = ConsultationExtraction.builder()
-                .consultId(id)
-                .res(res)
-                .actionsJson(objectMapper.writeValueAsString(res.defense_actions()))
-                .build();
-        extractionRepository.save(entity);
+        extractionRepository.save(ConsultationExtraction.builder()
+                .consultId(id).res(res).actionsJson(objectMapper.writeValueAsString(res.defense_actions())).build());
     }
 
     private void saveEvaluation(Long id, QualityScoringResponse res) {
         evaluationRepository.save(ConsultationEvaluation.builder()
-                .consultId(id)
-                .score(res.score())
-                .evaluationReason(res.evaluation_reason())
-                .isCandidate(res.is_candidate())
-                .build());
+                .consultId(id).score(res.score()).evaluationReason(res.evaluation_reason()).isCandidate(res.is_candidate()).build());
     }
 
     private String truncate(String msg) {

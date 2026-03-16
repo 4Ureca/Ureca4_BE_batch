@@ -9,8 +9,11 @@ spring:
       uri: ${MONGO_URI}
 
     redis:
-      host: ${REDIS_URI}
-      port: ${REDIS_PORT}
+      cluster:
+        nodes:
+          - ${REDIS_URI}:${REDIS_PORT}
+      ssl:
+        enabled: true
 
   elasticsearch:
     uris: ${ES_URI}

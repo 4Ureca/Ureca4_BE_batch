@@ -17,6 +17,8 @@ import org.springframework.batch.item.support.ListItemReader;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.transaction.PlatformTransactionManager;
 
 @Configuration
@@ -59,6 +61,14 @@ public ItemReader<Long> agentIdReader() { // 1. 반환 타입을 Long으로 변�
 
   @Bean
   public ItemWriter<DailyAgentReportSnapshot> mongoSnapshotWriter() {
-    return items -> items.forEach(mongoTemplate::save);
+    return items -> items.forEach(snapshot -> {
+      Query query = new Query(
+          Criteria.where("agentId").is(snapshot.getAgentId())
+              .and("startAt").is(snapshot.getStartAt())
+      );
+      // 동일 agentId + startAt 조합이 존재하면 교체, 없으면 삽입
+      mongoTemplate.remove(query, DailyAgentReportSnapshot.class);
+      mongoTemplate.save(snapshot);
+    });
   }
 }

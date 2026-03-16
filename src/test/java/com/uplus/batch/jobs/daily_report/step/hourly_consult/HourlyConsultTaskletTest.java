@@ -1,6 +1,13 @@
 package com.uplus.batch.jobs.daily_report.step.hourly_consult;
 
-import com.uplus.batch.common.elasticsearch.ElasticsearchAnalyzeService;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregate;
+import co.elastic.clients.elasticsearch._types.aggregations.StringTermsAggregate;
+import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
+import co.elastic.clients.elasticsearch._types.aggregations.Buckets;
+import co.elastic.clients.util.ObjectBuilder;
 import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,9 +30,7 @@ import org.springframework.data.mongodb.core.aggregation.Aggregation;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -37,13 +42,15 @@ import static org.mockito.Mockito.*;
 /**
  * HourlyConsultTasklet 단위 테스트
  *
+ * [변경] MySQL+Nori analyze → ES consult-keyword-index terms aggregation 방식으로 전환됨에 따라
+ *        JdbcTemplate/ElasticsearchAnalyzeService 대신 ElasticsearchClient mock 사용
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class HourlyConsultTaskletTest {
 
     @Mock private MongoTemplate mongoTemplate;
-    @Mock private ElasticsearchAnalyzeService analyzeService;
+    @Mock private ElasticsearchClient elasticsearchClient;
     @Mock private StepContribution contribution;
     @Mock private ChunkContext chunkContext;
     @Mock private StepContext stepContext;
@@ -51,12 +58,8 @@ class HourlyConsultTaskletTest {
     @Mock private JobExecution jobExecution;
     @Mock private AggregationResults<Document> aggregationResults;
 
-    // ✅ @Mock 제거 — makeJdbcStub()으로 테스트별 생성
-    // @Mock private JdbcTemplate jdbcTemplate;  // varargs mock 이슈로 제거
-
     @BeforeEach
     void setUp() {
-        // tasklet은 각 테스트에서 makeTasklet()으로 생성
         ExecutionContext executionContext = new ExecutionContext();
         given(contribution.getStepExecution()).willReturn(stepExecution);
         given(stepExecution.getJobExecution()).willReturn(jobExecution);
@@ -66,49 +69,42 @@ class HourlyConsultTaskletTest {
     }
 
     // ─────────────────────────────────────────────────────
-    //  JdbcTemplate 익명 stub 헬퍼
-    //
-    //  사용법:
-    //    makeJdbcStub(fakeRows)              → 모든 호출에 fakeRows 반환
-    //    makeJdbcStub(fakeRows, List.of())   → 1번째는 fakeRows, 2·3번째는 List.of()
-    //
-    //  Mockito willReturn 체이닝과 동일하게 동작:
-    //  호출 횟수가 지정 개수를 초과하면 마지막 결과를 계속 반환
+    //  ES SearchResponse mock 헬퍼
     // ─────────────────────────────────────────────────────
 
-    @SafeVarargs
-    private JdbcTemplate makeJdbcStub(
-            List<Map<String, Object>> first,
-            List<Map<String, Object>>... rest) {
+    /**
+     * ES terms aggregation 응답을 mock 합니다.
+     * keyword → count 쌍을 받아서 SearchResponse<Void>를 반환하도록 설정합니다.
+     */
+    @SuppressWarnings("unchecked")
+    private void stubEsKeywordAggregation(Map<String, Long> keywords) throws Exception {
+        // StringTermsBucket 리스트 생성
+        List<StringTermsBucket> buckets = keywords.entrySet().stream()
+                .map(e -> StringTermsBucket.of(b -> b
+                        .key(e.getKey())
+                        .docCount(e.getValue())
+                ))
+                .toList();
 
-        List<List<Map<String, Object>>> seq = new ArrayList<>();
-        seq.add(first);
-        for (List<Map<String, Object>> r : rest) {
-            seq.add(r);
-        }
+        StringTermsAggregate sterms = StringTermsAggregate.of(s -> s
+                .buckets(Buckets.of(b -> b.array(buckets)))
+                .sumOtherDocCount(0L)
+        );
 
-        int[] counter = {0};
+        Aggregate aggregate = Aggregate.of(a -> a.sterms(sterms));
 
-        return new JdbcTemplate() {
-            @Override
-            public List<Map<String, Object>> queryForList(String sql, Object... args) {
-                // 호출 횟수 초과 시 마지막 결과 반환 (Mockito willReturn 체이닝과 동일)
-                int idx = Math.min(counter[0]++, seq.size() - 1);
-                return seq.get(idx);
-            }
-        };
+        SearchResponse<Void> response = mock(SearchResponse.class);
+        given(response.aggregations()).willReturn(Map.of("slot_keywords", aggregate));
+
+        given(elasticsearchClient.search(any(java.util.function.Function.class), eq(Void.class)))
+                .willReturn(response);
     }
 
-    /** tasklet 생성 헬퍼 — JdbcTemplate stub과 함께 */
-    @SafeVarargs
-    private HourlyConsultTasklet makeTasklet(
-            List<Map<String, Object>> first,
-            List<Map<String, Object>>... rest) {
-
+    /** tasklet 생성 헬퍼 */
+    private HourlyConsultTasklet makeTasklet() {
         return new HourlyConsultTasklet(
                 mongoTemplate,
-                analyzeService,
-                makeJdbcStub(first, rest),
+                elasticsearchClient,
                 "2026-03-03",
                 "09-12"
         );
@@ -129,24 +125,12 @@ class HourlyConsultTaskletTest {
     // ─────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("정상: 고객 발화 2건 → Nori 분석 2회 호출 → snapshot upsert")
+    @DisplayName("정상: ES 키워드 집계 결과 → snapshot upsert")
     void execute_normalCase_savesSnapshot() throws Exception {
 
-        List<Map<String, Object>> fakeRows = List.of(
-                Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"요금이 너무 많이 나온 것 같아서요\"},{\"speaker\":\"상담사\",\"message\":\"확인해드리겠습니다\"}]",
-                        "grade_code", "VIP"),
-                Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"기기변경 가능한지 문의드립니다\"},{\"speaker\":\"상담사\",\"message\":\"네 도와드리겠습니다\"}]",
-                        "grade_code", "DIAMOND")
-        );
+        HourlyConsultTasklet tasklet = makeTasklet();
 
-        // 1번(슬롯)만 fakeRows, 2·3번(daily·byCustomerType)은 빈 리스트
-        // → analyzeService.analyze가 정확히 2회 호출됨
-        HourlyConsultTasklet tasklet = makeTasklet(fakeRows, List.of(), List.of());
-
-        given(analyzeService.analyze(contains("요금"))).willReturn(List.of("요금", "납부"));
-        given(analyzeService.analyze(contains("기기변경"))).willReturn(List.of("기기변경", "단말"));
+        stubEsKeywordAggregation(Map.of("요금", 5L, "납부", 3L, "기기변경", 2L));
         given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString())).willReturn(null);
 
         Document categoryDoc = new Document("_id", "요금/납부")
@@ -159,70 +143,60 @@ class HourlyConsultTaskletTest {
         // then
         assertThat(status).isEqualTo(RepeatStatus.FINISHED);
         verify(mongoTemplate, times(1)).upsert(any(Query.class), any(Update.class), eq("daily_report_snapshot"));
-        verify(analyzeService, times(2)).analyze(anyString());
     }
 
     @Test
-    @DisplayName("고객 발화 없는 원문 → analyzeService 호출 안 됨")
-    void execute_noCustomerSpeech_skipsAnalysis() throws Exception {
+    @DisplayName("ES 키워드 결과 비어있을 때 빈 결과로 정상 완료")
+    void execute_emptyKeywords_completesNormally() throws Exception {
 
-        List<Map<String, Object>> fakeRows = List.of(
-                Map.of("raw_text_json",
-                        "[{\"speaker\":\"상담사\",\"message\":\"안녕하세요 LG유플러스입니다\"}]",
-                        "grade_code", "VIP")
-        );
+        HourlyConsultTasklet tasklet = makeTasklet();
 
-        // 상담사 발화만 있으므로 3번 모두 fakeRows여도 analyze 미호출
-        HourlyConsultTasklet tasklet = makeTasklet(fakeRows);
-
+        stubEsKeywordAggregation(Map.of());
         given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString())).willReturn(null);
         stubCategoryAggregation(List.of());
 
         RepeatStatus status = tasklet.execute(contribution, chunkContext);
 
         assertThat(status).isEqualTo(RepeatStatus.FINISHED);
-        verify(analyzeService, never()).analyze(anyString());
+        verify(mongoTemplate, times(1)).upsert(any(), any(), eq("daily_report_snapshot"));
     }
 
     @Test
-    @DisplayName("raw_text_json 파싱 실패 → 해당 건 스킵, 정상 건은 처리")
-    void execute_malformedJson_skipAndContinue() throws Exception {
+    @DisplayName("null/한글자 키워드 필터링 확인")
+    void execute_filtersNullAndShortKeywords() throws Exception {
 
-        List<Map<String, Object>> fakeRows = List.of(
-                Map.of("raw_text_json", "INVALID_JSON", "grade_code", "VIP"),
-                Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"해지하고 싶어요\"}]",
-                        "grade_code", "VVIP")
-        );
+        HourlyConsultTasklet tasklet = makeTasklet();
 
-        // 1번(슬롯)만 fakeRows → 정상 건 1건에 대해서만 analyze 호출
-        // 2·3번 빈 리스트 → analyze 추가 호출 없음
-        HourlyConsultTasklet tasklet = makeTasklet(fakeRows, List.of(), List.of());
-
-        given(analyzeService.analyze(anyString())).willReturn(List.of("해지", "탈퇴"));
+        // "null"과 한글자 "요"는 필터링되어야 함
+        stubEsKeywordAggregation(Map.of(
+                "요금", 10L,
+                "null", 5L,
+                "요", 3L,
+                "납부", 2L
+        ));
         given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString())).willReturn(null);
         stubCategoryAggregation(List.of());
 
         RepeatStatus status = tasklet.execute(contribution, chunkContext);
 
         assertThat(status).isEqualTo(RepeatStatus.FINISHED);
-        verify(analyzeService, times(1)).analyze(anyString()); // 정상 건 1건만
+
+        // upsert 된 Update 캡처하여 키워드 확인
+        ArgumentCaptor<Update> captor = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).upsert(any(), captor.capture(), anyString());
+        String updateStr = captor.getValue().toString();
+        // "요금", "납부"는 포함, "null"과 "요"는 제외
+        assertThat(updateStr).contains("요금");
+        assertThat(updateStr).contains("납부");
     }
 
     @Test
-    @DisplayName("전일 snapshot 있을 때 증감율 포함 Update 저장")
+    @DisplayName("전일 snapshot 있을 때 증감율 계산")
     void execute_withPreviousSnapshot_calculatesChangeRate() throws Exception {
 
-        List<Map<String, Object>> fakeRows = List.of(
-                Map.of("raw_text_json",
-                        "[{\"speaker\":\"고객\",\"message\":\"요금 납부 문의입니다\"}]",
-                        "grade_code", "VIP")
-        );
+        HourlyConsultTasklet tasklet = makeTasklet();
 
-        // 3번 모두 fakeRows → 증감율 계산을 위한 analyze 다수 호출 허용
-        HourlyConsultTasklet tasklet = makeTasklet(fakeRows);
-
-        given(analyzeService.analyze(anyString())).willReturn(List.of("요금", "납부"));
+        stubEsKeywordAggregation(Map.of("요금", 20L, "납부", 5L));
 
         Document prevSnapshot = new Document("timeSlotTrend", List.of(
                 new Document("slot", "09-12").append("keywordAnalysis",
@@ -230,11 +204,10 @@ class HourlyConsultTaskletTest {
                                 List.of(new Document("keyword", "요금").append("count", 10L))))))
                 .append("keywordSummary", new Document("topKeywords", List.of()));
 
-        // 호출 순서: 오늘 snapshot(null) → 전일 slot → 전일 daily
+        // 호출 순서: 전일 slot → 오늘 snapshot(null)
         given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString()))
-                .willReturn(null)
                 .willReturn(prevSnapshot)
-                .willReturn(prevSnapshot);
+                .willReturn(null);
 
         stubCategoryAggregation(List.of());
 
@@ -247,19 +220,19 @@ class HourlyConsultTaskletTest {
     }
 
     @Test
-    @DisplayName("MySQL 원문 없을 때 빈 결과로 정상 완료")
-    void execute_emptyRows_completesNormally() throws Exception {
+    @DisplayName("유효하지 않은 슬롯이면 스킵")
+    void execute_invalidSlot_skips() throws Exception {
 
-        // 3번 모두 빈 리스트 → for-each 미실행, analyze 미호출
-        HourlyConsultTasklet tasklet = makeTasklet(List.of());
-
-        given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString())).willReturn(null);
-        stubCategoryAggregation(List.of());
+        HourlyConsultTasklet tasklet = new HourlyConsultTasklet(
+                mongoTemplate,
+                elasticsearchClient,
+                "2026-03-03",
+                "99-99"  // 잘못된 슬롯
+        );
 
         RepeatStatus status = tasklet.execute(contribution, chunkContext);
 
         assertThat(status).isEqualTo(RepeatStatus.FINISHED);
-        verify(analyzeService, never()).analyze(anyString());
-        verify(mongoTemplate, times(1)).upsert(any(), any(), eq("daily_report_snapshot"));
+        verify(mongoTemplate, never()).upsert(any(), any(), anyString());
     }
 }

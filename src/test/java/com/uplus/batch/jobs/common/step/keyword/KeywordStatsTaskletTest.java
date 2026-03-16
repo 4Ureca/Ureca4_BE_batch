@@ -65,24 +65,27 @@ class KeywordStatsTaskletTest {
         keywordCounts.forEach((keyword, count) ->
                 topKeywords.add(new Document("keyword", keyword).append("count", count)));
 
-        return new Document("date", date).append("topKeywords", topKeywords);
+        Document keywordSummary = new Document("topKeywords", topKeywords);
+        return new Document("date", date).append("keywordSummary", keywordSummary);
     }
 
-    /** topKeywords + byGradeCode 포함 Document 생성 */
+    /** topKeywords + byCustomerType 포함 Document 생성 */
     private Document createSnapshotWithGrade(LocalDate date,
                                               Map<String, Integer> keywordCounts,
                                               Map<String, Map<String, Integer>> gradeKeywords) {
         Document snapshot = createSnapshot(date, keywordCounts);
 
-        List<Document> byGradeCode = new ArrayList<>();
-        gradeKeywords.forEach((gradeCode, keywords) -> {
+        List<Document> byCustomerType = new ArrayList<>();
+        gradeKeywords.forEach((customerType, keywords) -> {
             List<Document> kwDocs = new ArrayList<>();
             keywords.forEach((kw, cnt) ->
                     kwDocs.add(new Document("keyword", kw).append("count", cnt)));
-            byGradeCode.add(new Document("gradeCode", gradeCode).append("keywords", kwDocs));
+            byCustomerType.add(new Document("customerType", customerType).append("keywords", kwDocs));
         });
 
-        snapshot.append("byGradeCode", byGradeCode);
+        // keywordSummary 안에 byCustomerType 추가
+        Document keywordSummary = snapshot.get("keywordSummary", Document.class);
+        keywordSummary.append("byCustomerType", byCustomerType);
         return snapshot;
     }
 
@@ -280,8 +283,8 @@ class KeywordStatsTaskletTest {
     class LongTermKeywords {
 
         @Test
-        @DisplayName("28일 중 15일 TOP10 등장 → 장기 키워드로 분류")
-        void 일14일이상_등장시_장기키워드() throws Exception {
+        @DisplayName("28일 중 5일 TOP10 등장 → 장기 키워드로 분류")
+        void 일4일이상_등장시_장기키워드() throws Exception {
             // given
             initContext("2025-01-08", "2025-01-14");
 
@@ -289,12 +292,12 @@ class KeywordStatsTaskletTest {
             List<Document> current = List.of(
                     createSnapshot(LocalDate.of(2025, 1, 8), Map.of("해지", 50)));
 
-            // 28일 lookback 스냅샷 — "해지"가 15일 등장
+            // 28일 lookback 스냅샷 — "해지"가 5일 등장
             List<Document> longTermSnapshots = new ArrayList<>();
             for (int i = 0; i < 28; i++) {
                 Map<String, Integer> keywords = new HashMap<>();
-                if (i < 15) {
-                    keywords.put("해지", 10);  // 15일 등장
+                if (i < 5) {
+                    keywords.put("해지", 10);  // 5일 등장
                 }
                 keywords.put("기타키워드" + i, 5); // 매일 다른 키워드
                 longTermSnapshots.add(createSnapshot(LocalDate.of(2024, 12, 18).plusDays(i), keywords));
@@ -317,24 +320,24 @@ class KeywordStatsTaskletTest {
                     .filter(d -> "해지".equals(d.getString("keyword")))
                     .findFirst().orElse(null);
             assertThat(target).isNotNull();
-            assertThat(target.getInteger("appearanceDays")).isEqualTo(15);
+            assertThat(target.getInteger("appearanceDays")).isEqualTo(5);
             assertThat(target.getInteger("totalDays")).isEqualTo(28);
         }
 
         @Test
-        @DisplayName("28일 중 13일 등장 → LONG_TERM_THRESHOLD(14) 미달로 제외")
-        void 일13일_등장시_제외() throws Exception {
+        @DisplayName("28일 중 3일 등장 → LONG_TERM_THRESHOLD(4) 미달로 제외")
+        void 일3일_등장시_제외() throws Exception {
             // given
             initContext("2025-01-08", "2025-01-14");
 
             List<Document> current = List.of(
                     createSnapshot(LocalDate.of(2025, 1, 8), Map.of("해지", 50)));
 
-            // 28일 lookback — "해지"가 13일만 등장
+            // 28일 lookback — "해지"가 3일만 등장
             List<Document> longTermSnapshots = new ArrayList<>();
             for (int i = 0; i < 28; i++) {
                 Map<String, Integer> keywords = new HashMap<>();
-                if (i < 13) {
+                if (i < 3) {
                     keywords.put("해지", 10);
                 }
                 keywords.put("기타키워드" + i, 5);
@@ -353,7 +356,7 @@ class KeywordStatsTaskletTest {
             Document kwSummary = captureKeywordSummary();
             List<Document> longTermTopKeywords = kwSummary.getList("longTermTopKeywords", Document.class);
 
-            // "해지"는 13일만 등장 → 장기 키워드에 포함되지 않아야 함
+            // "해지"는 3일만 등장 → 장기 키워드에 포함되지 않아야 함
             boolean hasHaeji = longTermTopKeywords.stream()
                     .anyMatch(d -> "해지".equals(d.getString("keyword")));
             assertThat(hasHaeji).isFalse();
@@ -438,7 +441,7 @@ class KeywordStatsTaskletTest {
             assertThat(byCustomerType).hasSize(1);
             Document vip = byCustomerType.get(0);
             assertThat(vip.getString("customerType")).isEqualTo("VIP");
-            List<String> keywords = vip.getList("keywords", String.class);
+            List<Document> keywords = vip.getList("keywords", Document.class);
             assertThat(keywords).hasSize(5);
         }
 

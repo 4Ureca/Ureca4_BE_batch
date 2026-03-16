@@ -12,10 +12,14 @@ import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,27 +37,31 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
     // mysql 에서 상품 정보 가져옴
     Map<String, String> productMasterMap = loadProductMaster();
 
-    // 1. 집계 기간 설정 (데이터가 있는 2025년 1월로 테스트)
-    LocalDateTime startAt = LocalDateTime.of(2025, 1, 1, 0, 0, 0);
-    LocalDateTime endAt = LocalDateTime.of(2025, 1, 31, 23, 59, 59);
+    // 1. 집계 기간 설정 — Job 파라미터 우선, 없으면 지난주 월~일
+    Map<String, Object> jobParams = chunkContext.getStepContext().getJobParameters();
+    String startDateStr = (String) jobParams.get("startDate");
+    String endDateStr = (String) jobParams.get("endDate");
 
-    /** [운영용] 배치가 실행되는 시점 기준 "지난주 월요일 ~ 일요일" 계산 **/
-//    LocalDate now = LocalDate.now();
-//    LocalDateTime startAt = now.minusWeeks(1)
-//        .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
-//        .atStartOfDay(); // 지난주 월요일 00:00:00
-//
-//    LocalDateTime endAt = startAt.plusDays(6)
-//        .with(java.time.LocalTime.of(23, 59, 59)); // 지난주 일요일 23:59:59
+    LocalDateTime startAt;
+    LocalDateTime endAt;
+
+    if (startDateStr != null && endDateStr != null) {
+      startAt = LocalDate.parse(startDateStr).atStartOfDay();
+      endAt = LocalDate.parse(endDateStr).atTime(23, 59, 59);
+    } else {
+      LocalDate now = LocalDate.now();
+      startAt = now.minusWeeks(1)
+          .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+          .atStartOfDay();
+      endAt = startAt.plusDays(6).toLocalDate().atTime(23, 59, 59);
+    }
 
 
-    log.info("[WeeklyStats] 주별 리포트 집계 시작: {} ~ {}", startAt, endAt);
+    log.info("[WeeklyStats] {} ~ {} 집계 시작", startAt, endAt);
 
     // 2. MongoDB에서 상담 요약 데이터 조회 (컬렉션명: consultation_summary)
     Query query = new Query(Criteria.where("consultedAt").gte(startAt).lte(endAt));
     List<Document> summaries = mongoTemplate.find(query, Document.class, "consultation_summary");
-
-    log.info("[WeeklyStats] 조회된 상담 건수: {}건", summaries.size());
 
     // 3. 집계를 위한 임시 Map (ID별 Stats 저장)
     Map<String, ProductStats> newSubMap = new HashMap<>();
@@ -80,12 +88,11 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
         if (subIds != null) {
           processAction(subIds, newSubMap, productMasterMap);
 
-          // 연령대별 상품 카운트를 수행
+          // 연령대별 상품 카운트를 수행 (productId 기준)
           for (String id : subIds) {
-            String productName = productMasterMap.getOrDefault(id, id);
             ageGroupPrefs
                 .computeIfAbsent(ageGroup, k -> new HashMap<>())
-                .merge(productName, 1L, Long::sum);
+                .merge(id, 1L, Long::sum);
           }
         }
 
@@ -99,7 +106,6 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
     WeeklyReportSnapshot snapshot = new WeeklyReportSnapshot();
     snapshot.setStartAt(startAt);
     snapshot.setEndAt(endAt);
-
     WeeklyReportSnapshot.SubscriptionAnalysis analysis = new WeeklyReportSnapshot.SubscriptionAnalysis();
 
     // Map 데이터를 명세서 구조(List<ProductCount>)로 변환
@@ -112,7 +118,7 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
     List<WeeklyReportSnapshot.ByAgeGroup> agePrefsList = ageGroupPrefs.entrySet().stream()
         .map(entry -> {
           List<WeeklyReportSnapshot.ProductCount> top3 = entry.getValue().entrySet().stream()
-              .map(e -> new WeeklyReportSnapshot.ProductCount(null, e.getKey(), e.getValue()))
+              .map(e -> new WeeklyReportSnapshot.ProductCount(e.getKey(), productMasterMap.getOrDefault(e.getKey(), e.getKey()), e.getValue()))
               .sorted(Comparator.comparingLong(WeeklyReportSnapshot.ProductCount::getCount).reversed())
               .limit(3)
               .collect(Collectors.toList());
@@ -126,15 +132,18 @@ public class WeeklySubscriptionStatsTasklet implements Tasklet {
 
     snapshot.setSubscriptionAnalysis(analysis);
 
-    // 6. MongoDB 저장 및 로그 출력
-    log.info("[WeeklyStats] 최종 집계 결과: 신규 {}건, 해지 {}건",
-        analysis.getNewSubscriptions().size(),
-        analysis.getCanceledSubscriptions().size());
+    // 6. MongoDB 저장
+    Query upsertQuery = new Query(Criteria.where("startAt").is(startAt));
 
-    // 실제 저장
-    mongoTemplate.save(snapshot, "weekly_report_snapshot");
-    log.info("[WeeklyStats] MongoDB 저장 완료 (ID: {})", snapshot.getId());
+    Update update = new Update()
+        .set("startAt", startAt)
+        .set("endAt", endAt)
+        .set("subscriptionAnalysis", analysis)
+        .setOnInsert("createdAt", LocalDateTime.now());
 
+    mongoTemplate.upsert(upsertQuery, update, "weekly_report_snapshot");
+
+    log.info("[WeeklyStats] {} ~ {} 집계 완료", startAt, endAt);
     return RepeatStatus.FINISHED;
   }
 
