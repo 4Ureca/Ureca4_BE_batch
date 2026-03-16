@@ -80,14 +80,7 @@
       },
 
       "customerName": {
-        "type": "text",
-        "analyzer": "consult_index_analyzer",
-        "search_analyzer": "consult_search_analyzer",
-        "fields": {
-          "raw": {
-            "type": "keyword"
-          }
-        }
+        "type": "keyword"
       },
 
       "phone": {
@@ -156,6 +149,22 @@
 
       "defenseSuccess": {
         "type": "boolean"
+      },
+
+      "complaintCategory": {
+        "type": "keyword"
+      },
+
+      "defenseCategory": {
+        "type": "keyword"
+      },
+
+      "outboundResult": {
+        "type": "keyword"
+      },
+
+      "outboundCategory": {
+        "type": "keyword"
       },
 
       "changeTypes": {

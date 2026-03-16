@@ -25,6 +25,8 @@ public record ConsultationResultSyncRow(
     String categoryCode,
     String categoryLarge,
     String categoryMedium,
-    String categorySmall
+    String categorySmall,
+
+    String consultationType   // "IN" / "OUT"
 ) {
 }

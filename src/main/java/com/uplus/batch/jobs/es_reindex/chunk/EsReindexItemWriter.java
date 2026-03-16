@@ -3,11 +3,12 @@ package com.uplus.batch.jobs.es_reindex.chunk;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uplus.batch.domain.summary.dto.RawTextRow;
 import com.uplus.batch.domain.summary.entity.ConsultationSummary;
+import com.uplus.batch.domain.summary.repository.ProductRepository;
 import com.uplus.batch.domain.summary.repository.SummaryEventStatusRepository;
 import com.uplus.batch.domain.summary.service.SummaryProcessingLockService;
+import com.uplus.batch.domain.summary.service.builder.SearchDocBuilder;
 import com.uplus.batch.jobs.summary_sync.chunk.KeywordProcessor;
 import com.uplus.batch.jobs.summary_sync.chunk.KeywordProcessor.KeywordResult;
-import com.uplus.batch.jobs.summary_sync.chunk.SearchDocBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.item.Chunk;
@@ -34,6 +35,7 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
   private final ElasticsearchOperations elasticsearchOperations;
   private final MongoTemplate mongoTemplate;
   private final SummaryEventStatusRepository summaryEventStatusRepository;
+  private final ProductRepository productRepository;
   private final SummaryProcessingLockService lockService;
   private final KeywordProcessor keywordProcessor;
   private final SearchDocBuilder searchDocBuilder;
@@ -84,9 +86,17 @@ public class EsReindexItemWriter implements ItemWriter<ConsultationSummary> {
 
         // 상품 코드 추출
         List<String> productCodes = extractProductCodes(summary.getResultProducts());
+        List<String> productNames = productCodes.stream()
+            .map(productRepository::findProductName)
+            .filter(Objects::nonNull)
+            .toList();
 
-        searchDocs.add(searchDocBuilder.buildSearchDoc(summary, productCodes, keywordResult));
-        keywordDocs.add(searchDocBuilder.buildKeywordDoc(consultId, messages, summary));
+        searchDocs.add(
+            searchDocBuilder.buildSearchDoc(summary, productCodes, productNames, keywordResult)
+        );
+        keywordDocs.add(
+            searchDocBuilder.buildKeywordDoc(summary, messages)
+        );
 
         successIds.add(consultId);
 

@@ -21,14 +21,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.PlatformTransactionManager;
 
-@Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class EsReindexJobConfig {
 
   private final JobRepository jobRepository;
   private final PlatformTransactionManager transactionManager;
-  private final JobLauncher jobLauncher;
   private final EsReindexItemWriter writer;
   private final MongoTemplate mongoTemplate;
   private final SummaryProcessingLockService lockService;
@@ -53,19 +51,5 @@ public class EsReindexJobConfig {
         .reader(esReindexItemReader())
         .writer(writer)
         .build();
-  }
-
-  @Scheduled(fixedDelay = 10 * 60 * 1000)
-  public void schedule() {
-    try {
-      JobParameters params = new JobParametersBuilder()
-          .addLong("runAt", System.currentTimeMillis())
-          .toJobParameters();
-
-      jobLauncher.run(esReindexJob(), params);
-
-    } catch (Exception e) {
-      log.error("ES 재처리 배치 실행 실패", e);
-    }
   }
 }

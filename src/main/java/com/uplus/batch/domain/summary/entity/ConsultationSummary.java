@@ -38,6 +38,7 @@ public class ConsultationSummary {
   private List<RiskFlag> riskFlags;
   private Customer customer;
   private Cancellation cancellation;
+  private Outbound outbound;
   private List<ResultProducts> resultProducts;
   private LocalDateTime createdAt;
   /** 데이터 출처 식별자. 합성 데이터는 "SYNTHETIC", 실 운영 데이터는 null. */
@@ -107,7 +108,16 @@ public class ConsultationSummary {
     private Boolean defenseAttempted;
     private Boolean defenseSuccess;
     private List<String> defenseActions;
+    private String complaintCategory;
+    private String defenseCategory;
     private String complaintReasons;
+  }
+
+  @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
+  public static class Outbound {
+    private String callResult;
+    private String rejectReason;
+    private String outboundReport;
   }
 
   @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor

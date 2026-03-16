@@ -8,7 +8,13 @@ public record RetentionAnalysisRow(
     Boolean defenseAttempted,
     Boolean defenseSuccess,
     List<String> defenseActions,
+    String defenseCategory,
     String complaintReason,
-    String rawSummary
+    String complaintCategory,
+    String rawSummary,
+
+    String outboundCallResult,    // "CONVERTED" / "REJECTED" / null
+    String outboundCategory,      // 거절 사유 코드 (COST, NO_NEED 등)
+    String outboundReport         // AI 분석 텍스트
 ) {
 }
