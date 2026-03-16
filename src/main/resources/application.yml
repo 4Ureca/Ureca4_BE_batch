@@ -34,7 +34,6 @@ gemini:
     key: ${GEMINI_API_KEY}
 
 historical-batch:
-  enabled: true      # 배치 실행 시 true로 변경 후 /api/historical/run 호출
   start-date: "2026-01-01"
   end-date: "2026-03-24"
   daily-count: 10     # 일일 생성 건수 ----- 기존 : 1000(하루 1000건 생성)

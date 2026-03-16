@@ -27,25 +27,9 @@ class HistoricalBatchControllerTest {
     private HistoricalBatchController controller;
 
     @Test
-    @DisplayName("POST /run: enabled=false이면 403을 반환한다")
-    void runBatch_Disabled_Returns403() {
-        // Given
-        given(properties.isEnabled()).willReturn(false);
-
-        // When
-        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null, false);
-
-        // Then
-        assertThat(response.getStatusCode().value()).isEqualTo(403);
-        assertThat(response.getBody()).containsKey("status");
-        assertThat(response.getBody().get("status")).isEqualTo("disabled");
-    }
-
-    @Test
     @DisplayName("POST /run: 이미 실행 중이면 409를 반환한다")
     void runBatch_AlreadyRunning_Returns409() {
         // Given
-        given(properties.isEnabled()).willReturn(true);
         given(properties.getDailyCount()).willReturn(10);
         given(batchService.isRunning()).willReturn(true);
 
@@ -61,7 +45,6 @@ class HistoricalBatchControllerTest {
     @DisplayName("POST /run: 정상 조건이면 202 Accepted를 반환하고 백그라운드 스레드를 시작한다")
     void runBatch_Success_Returns202() {
         // Given
-        given(properties.isEnabled()).willReturn(true);
         given(batchService.isRunning()).willReturn(false);
         given(properties.getStartDate()).willReturn(LocalDate.of(2026, 1, 1));
         given(properties.getEndDate()).willReturn(LocalDate.of(2026, 3, 24));
@@ -108,11 +91,10 @@ class HistoricalBatchControllerTest {
     }
 
     @Test
-    @DisplayName("GET /health: running과 enabled 상태를 반환한다")
-    void health_ReturnsRunningAndEnabled() {
+    @DisplayName("GET /health: running 상태를 반환한다")
+    void health_ReturnsRunning() {
         // Given
         given(batchService.isRunning()).willReturn(false);
-        given(properties.isEnabled()).willReturn(true);
 
         // When
         ResponseEntity<Map<String, Object>> response = controller.health();
@@ -120,6 +102,5 @@ class HistoricalBatchControllerTest {
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody().get("running")).isEqualTo(false);
-        assertThat(response.getBody().get("enabled")).isEqualTo(true);
     }
 }
