@@ -36,7 +36,8 @@ public class HistoricalBatchController {
     @PostMapping("/run")
     public ResponseEntity<Map<String, Object>> runBatch(
             @RequestParam(required = false) Integer dailyCount,
-            @RequestParam(required = false) Integer outboundRatio) {
+            @RequestParam(required = false) Integer outboundRatio,
+            @RequestParam(required = false, defaultValue = "false") boolean reset) {
 
         if (!properties.isEnabled()) {
             return ResponseEntity.status(403).body(Map.of(
@@ -73,10 +74,11 @@ public class HistoricalBatchController {
         int outboundPerDay = Math.round((float) finalCount * finalRatio / 100);
         int inboundPerDay  = finalCount - outboundPerDay;
 
+        final boolean finalReset = reset;
         Thread batchThread = new Thread(() -> {
             try {
                 log.info("[HistoricalBatch] 백그라운드 배치 시작");
-                String result = batchService.runBatch(finalCount, finalRatio);
+                String result = batchService.runBatch(finalCount, finalRatio, finalReset);
                 log.info("[HistoricalBatch] 배치 완료: {}", result);
             } catch (Exception e) {
                 log.error("[HistoricalBatch] 배치 중 예외 발생", e);

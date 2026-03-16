@@ -64,11 +64,15 @@ public class HistoricalBatchService {
     }
 
     public String runBatch(int dailyCount, int outboundRatio) {
+        return runBatch(dailyCount, outboundRatio, false);
+    }
+
+    public String runBatch(int dailyCount, int outboundRatio, boolean resetCompleted) {
         if (!running.compareAndSet(false, true)) {
             return "이미 실행 중입니다.";
         }
         try {
-            return executeBatch(dailyCount, outboundRatio);
+            return executeBatch(dailyCount, outboundRatio, resetCompleted);
         } finally {
             running.set(false);
         }
@@ -80,7 +84,7 @@ public class HistoricalBatchService {
 
     // ─── 메인 루프 ─────────────────────────────────────────────────────────────
 
-    private String executeBatch(int dailyCount, int outboundRatio) {
+    private String executeBatch(int dailyCount, int outboundRatio, boolean resetCompleted) {
         LocalDate startDate = properties.getStartDate();
         LocalDate endDate   = properties.getEndDate();
 
@@ -89,6 +93,12 @@ public class HistoricalBatchService {
 
         log.info("[HistoricalBatch] 시작 — {} ~ {}, 일일 {}건 (인바운드 {}, 아웃바운드 {})",
                 startDate, endDate, dailyCount, inboundPerDay, outboundPerDay);
+
+        // reset=true면 COMPLETED 날짜를 PENDING으로 되돌린 후 재실행
+        if (resetCompleted) {
+            int reset = checkpointRepo.resetCompletedDates();
+            log.info("[HistoricalBatch] COMPLETED → PENDING 초기화: {}일", reset);
+        }
 
         // 날짜별 체크포인트 초기화 (이미 존재하는 날짜는 INSERT IGNORE)
         for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
