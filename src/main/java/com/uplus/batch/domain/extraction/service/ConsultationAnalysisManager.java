@@ -1,9 +1,10 @@
 package com.uplus.batch.domain.extraction.service;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.*; // 🚀 TimeUnit, Executor, CompletionException 위해 추가
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Qualifier; // 🚀 추가
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,9 @@ public class ConsultationAnalysisManager {
     private final AnalysisCodeRepository analysisCodeRepository;
     private final ObjectMapper objectMapper;
 
+    @Qualifier("geminiTaskExecutor")
+    private final Executor geminiTaskExecutor;
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void processIntegratedBundledTasks(List<TaskPair> taskPairs) {
         if (taskPairs == null || taskPairs.isEmpty()) return;
@@ -58,37 +62,55 @@ public class ConsultationAnalysisManager {
 
                 String manualContent = manualRepository.findByCategoryCodeAndIsActiveTrue(pairs.get(0).summaryTask().getCategoryCode())
                         .map(Manual::getContent).orElse("기본 매뉴얼");
-
-                /* [STEP 3] AI 비동기 실행: 요약은 번들(1회), 채점은 병렬(N회) */
+                
+                /* [Pre-Process] 글자 수 절삭 (만 자 제한) */
+                List<String> processedRawTexts = rawDataList.stream()
+                        .map(ConsultationRawText::getRawTextJson)
+                        .map(text -> (text != null && text.length() > 10000) ? text.substring(0, 10000) + "..." : text)
+                        .toList();
+                
+                /* [STEP 3] AI 비동기 실행 (Executor 적용 + 절삭 데이터 전달) */
                 CompletableFuture<List<AiExtractionResponse>> extractionFuture = CompletableFuture.supplyAsync(() ->
-                        geminiExtractor.extractBatch(rawDataList.stream().map(ConsultationRawText::getRawTextJson).toList(), groupType, validCodes)
+                        geminiExtractor.extractBatch(processedRawTexts, groupType, validCodes), geminiTaskExecutor
                 );
 
-                List<CompletableFuture<QualityScoringResponse>> scoringFutures = rawDataList.stream()
-                        .map(raw -> CompletableFuture.supplyAsync(() -> geminiQualityScorer.evaluate(raw.getRawTextJson(), manualContent))
+                List<CompletableFuture<QualityScoringResponse>> scoringFutures = processedRawTexts.stream()
+                        .map(text -> CompletableFuture.supplyAsync(() -> geminiQualityScorer.evaluate(text, manualContent), geminiTaskExecutor)
                                 .handle((res, ex) -> {
-                                    if (ex != null) { return null; } // 개별 채점 실패 시 null 반환 (격리)
+                                    if (ex != null) { 
+                                        log.warn("[AI Scoring Error] {}", ex.getMessage());
+                                        return null; 
+                                    }
                                     return res;
                                 })
                         ).toList();
 
-                /* [STEP 4] 결과 수집: 번들 요약 결과 대기 및 개수 검증 */
-                List<AiExtractionResponse> extractionResults = extractionFuture.join();
+                /* [STEP 4] 결과 수집 (3분 타임아웃 적용) */
+                List<AiExtractionResponse> extractionResults;
+                try {
+                    extractionResults = extractionFuture.orTimeout(180, TimeUnit.SECONDS).join();
+                } catch (Exception e) {
+                    throw new RuntimeException("AI 요약 응답 시간 초과(3분) 또는 통신 오류");
+                }
+
                 if (extractionResults.size() != pairs.size()) {
                     throw new RuntimeException("AI 응답 개수 불일치");
                 }
 
-                /* [STEP 5] 개별 저장 루프: 채점 낙오자가 있어도 나머지는 정상 처리 */
+                /* [STEP 5] 개별 저장 루프 (개별 채점 타임아웃 1분 적용) */
                 for (int i = 0; i < pairs.size(); i++) {
                     TaskPair pair = pairs.get(i);
                     Long cId = pair.summaryTask().getConsultId();
 
                     try {
-                        QualityScoringResponse scoreRes = scoringFutures.get(i).join();
+                        // 개별 채점도 무한 대기 방지를 위해 60초 타임아웃
+                        QualityScoringResponse scoreRes = scoringFutures.get(i)
+                                .orTimeout(60, TimeUnit.SECONDS)
+                                .join();
 
-                        if (scoreRes == null) { // AI 채점만 실패한 경우 처리
-                            pair.summaryTask().fail("채점 API 호출 실패");
-                            pair.scoringTask().fail("채점 API 호출 실패");
+                        if (scoreRes == null) { 
+                            pair.summaryTask().fail("채점 분석 실패");
+                            pair.scoringTask().fail("채점 분석 실패");
                             continue; 
                         }
 
@@ -99,8 +121,8 @@ public class ConsultationAnalysisManager {
                         pair.scoringTask().complete();
 
                     } catch (Exception e) {
-                        pair.summaryTask().fail("저장 오류: " + truncate(e.getMessage()));
-                        pair.scoringTask().fail("저장 오류: " + truncate(e.getMessage()));
+                        pair.summaryTask().fail("처리 중 오류/시간초과: " + truncate(e.getMessage()));
+                        pair.scoringTask().fail("처리 중 오류/시간초과: " + truncate(e.getMessage()));
                     }
                 }
 

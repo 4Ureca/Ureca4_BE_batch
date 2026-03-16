@@ -32,11 +32,15 @@ public class GeminiQualityScorer {
 
     private static final String MODEL_NAME = "gemini-2.5-flash-lite"; 
     
-    @Retryable(                             
-        retryFor = {Exception.class}, 
-        maxAttempts = 3, 
-        backoff = @Backoff(delay = 2000)
-    )
+    @Retryable(
+    	    retryFor = {Exception.class}, 
+    	    maxAttempts = 3, 
+    	    backoff = @Backoff(
+    	        delay = 2000,      
+    	        multiplier = 2.0,  
+    	        maxDelay = 10000   
+    	    )
+    	)
     public QualityScoringResponse evaluate(String rawIssue, String manualContent) {
         if (rawIssue == null || rawIssue.isBlank()) {
             throw new IllegalArgumentException("분석할 상담 원문이 비어 있습니다.");

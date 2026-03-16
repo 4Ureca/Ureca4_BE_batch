@@ -39,7 +39,15 @@ public class GeminiExtractor {
      * @param groupType 분석 모드 (OUTBOUND / INBOUND_CHN / INBOUND_NORMAL)
      * @param validCodes DB에서 조회한 유효 코드 목록
      */
-    @Retryable(retryFor = {Exception.class}, maxAttempts = 3, backoff = @Backoff(delay = 2000))
+    @Retryable(
+    	    retryFor = {Exception.class}, 
+    	    maxAttempts = 3, 
+    	    backoff = @Backoff(
+    	        delay = 2000,    
+    	        multiplier = 2.0, 
+    	        maxDelay = 10000  
+    	    )
+    	)
     public List<AiExtractionResponse> extractBatch(List<String> rawIssues, String groupType, Map<String, String> validCodes) {
         if (rawIssues == null || rawIssues.isEmpty()) return List.of();
 
