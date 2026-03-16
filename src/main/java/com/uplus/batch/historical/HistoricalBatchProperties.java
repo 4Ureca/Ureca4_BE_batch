@@ -22,9 +22,6 @@ import java.time.LocalDate;
 @ConfigurationProperties(prefix = "historical-batch")
 public class HistoricalBatchProperties {
 
-    /** true일 때 /api/historical/run API가 활성화된다 */
-    private boolean enabled = false;
-
     /** 과거 데이터 생성 시작일 (포함) */
     private LocalDate startDate = LocalDate.of(2026, 1, 1);
 

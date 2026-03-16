@@ -30,21 +30,13 @@ public class HistoricalBatchController {
     /**
      * 배치를 백그라운드 스레드로 실행한다.
      *
-     * <p>enabled=false이면 즉시 거부한다.
-     * 이미 실행 중이면 409를 반환한다.
+     * <p>이미 실행 중이면 409를 반환한다.
      */
     @PostMapping("/run")
     public ResponseEntity<Map<String, Object>> runBatch(
             @RequestParam(required = false) Integer dailyCount,
             @RequestParam(required = false) Integer outboundRatio,
             @RequestParam(required = false, defaultValue = "false") boolean reset) {
-
-        if (!properties.isEnabled()) {
-            return ResponseEntity.status(403).body(Map.of(
-                    "status", "disabled",
-                    "message", "historical-batch.enabled=false — application.yml에서 true로 변경 후 재시도"
-            ));
-        }
 
         int resolvedCount = (dailyCount != null) ? dailyCount : properties.getDailyCount();
         if (resolvedCount < 1 || resolvedCount > 100) {
@@ -108,11 +100,11 @@ public class HistoricalBatchController {
     public ResponseEntity<Map<String, Object>> getStatus() {
         List<Map<String, Object>> rows = checkpointRepo.findAllStatus();
 
-        long total     = rows.size();
-        long completed = rows.stream().filter(r -> "COMPLETED".equals(r.get("status"))).count();
-        long failed    = rows.stream().filter(r -> "FAILED".equals(r.get("status"))).count();
+        long total      = rows.size();
+        long completed  = rows.stream().filter(r -> "COMPLETED".equals(r.get("status"))).count();
+        long failed     = rows.stream().filter(r -> "FAILED".equals(r.get("status"))).count();
         long inProgress = rows.stream().filter(r -> "IN_PROGRESS".equals(r.get("status"))).count();
-        long pending   = rows.stream().filter(r -> "PENDING".equals(r.get("status"))).count();
+        long pending    = rows.stream().filter(r -> "PENDING".equals(r.get("status"))).count();
 
         return ResponseEntity.ok(Map.of(
                 "running", batchService.isRunning(),
@@ -131,9 +123,7 @@ public class HistoricalBatchController {
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
         return ResponseEntity.ok(Map.of(
-                "running", batchService.isRunning(),
-                "enabled", properties.isEnabled()
+                "running", batchService.isRunning()
         ));
     }
-
 }
