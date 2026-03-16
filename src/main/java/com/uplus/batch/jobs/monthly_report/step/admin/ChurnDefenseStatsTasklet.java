@@ -192,7 +192,7 @@ public class ChurnDefenseStatsTasklet implements Tasklet {
                             .append("avgDurationSec", avgDur);
                 })
                 .collect(Collectors.toList());
-        churnDefense.put("complaintCategory", complaintCategory);
+        churnDefense.put("complaintReasons", complaintCategory);
 
         // ── 고객 유형별 (연령+성별, 건수 내림차순) ──
         List<Document> byCustomerType = customerTypeMap.entrySet().stream()
