@@ -120,6 +120,15 @@ class HourlyConsultTaskletTest {
                 .willReturn(aggregationResults);
     }
 
+    /** 인바운드 consultId 목록 stub — 아웃바운드 제외 필터용 */
+    private void stubInboundConsultIds() {
+        given(mongoTemplate.find(any(Query.class), eq(Document.class), eq("consultation_summary")))
+                .willReturn(List.of(
+                        new Document("consultId", "C001"),
+                        new Document("consultId", "C002")
+                ));
+    }
+
     // ─────────────────────────────────────────────────────
     //  테스트 케이스
     // ─────────────────────────────────────────────────────
@@ -130,6 +139,7 @@ class HourlyConsultTaskletTest {
 
         HourlyConsultTasklet tasklet = makeTasklet();
 
+        stubInboundConsultIds();
         stubEsKeywordAggregation(Map.of("요금", 5L, "납부", 3L, "기기변경", 2L));
         given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString())).willReturn(null);
 
@@ -151,6 +161,7 @@ class HourlyConsultTaskletTest {
 
         HourlyConsultTasklet tasklet = makeTasklet();
 
+        stubInboundConsultIds();
         stubEsKeywordAggregation(Map.of());
         given(mongoTemplate.findOne(any(Query.class), eq(Document.class), anyString())).willReturn(null);
         stubCategoryAggregation(List.of());
@@ -167,6 +178,7 @@ class HourlyConsultTaskletTest {
 
         HourlyConsultTasklet tasklet = makeTasklet();
 
+        stubInboundConsultIds();
         // "null"과 한글자 "요"는 필터링되어야 함
         stubEsKeywordAggregation(Map.of(
                 "요금", 10L,
@@ -196,6 +208,7 @@ class HourlyConsultTaskletTest {
 
         HourlyConsultTasklet tasklet = makeTasklet();
 
+        stubInboundConsultIds();
         stubEsKeywordAggregation(Map.of("요금", 20L, "납부", 5L));
 
         Document prevSnapshot = new Document("timeSlotTrend", List.of(
