@@ -1,6 +1,8 @@
 package com.uplus.batch.synthetic;
 
+import com.uplus.batch.common.dummy.dto.CacheDummy;
 import com.uplus.batch.domain.summary.entity.SummaryEventStatus;
+import com.uplus.batch.domain.summary.repository.ProductRepository;
 import com.uplus.batch.domain.summary.repository.SummaryEventStatusRepository;
 import com.uplus.batch.synthetic.OutboundRawTextGenerator.OutboundTextResult;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +39,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>§2 분포 조건:
  * <ul>
- *   <li>결과: CONVERTED 45% / REJECTED 55% (outbound_category 분포로 제어)</li>
+ *   <li>결과: CHN CONVERTED 10% / UPSELL CONVERTED 60% / ARREARS CONVERTED 75% / TRB CONVERTED 35%</li>
  *   <li>고객 만족도 평가: 40% (아웃바운드 특성상 인바운드 70%보다 낮음)</li>
  *   <li>위험 감지 로그: 항상 생성 (아웃바운드 대상 = 이탈 위험 고객)</li>
  * </ul>
@@ -51,6 +53,8 @@ public class OutboundConsultationFactory {
     private final OutboundRawTextGenerator outboundRawTextGenerator;
     private final JdbcTemplate jdbcTemplate;
     private final SummaryEventStatusRepository summaryEventStatusRepo;
+    private final CacheDummy cacheDummy;
+    private final ProductRepository productRepository;
 
     public record BatchResult(List<Long> consultIds, List<String> categoryCodes) {
         public boolean isEmpty() { return consultIds.isEmpty(); }
@@ -77,46 +81,74 @@ public class OutboundConsultationFactory {
     @Transactional
     public BatchResult executeStep1WithDate(int batchSize, LocalDate targetDate) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        var agents    = personMatcher.getAgents();
-        var customers = personMatcher.getCustomers();
-        var chnCodes  = personMatcher.getChnCodes();
-        var feeCodes  = personMatcher.getFeeCodes();
-        var trbCodes  = personMatcher.getTrbCodes();
+        var agents         = personMatcher.getAgents();
+        var customers      = personMatcher.getCustomers();
+        var otbChnCodes    = personMatcher.getOtbChnCodes();
+        var otbUpsellCodes = personMatcher.getOtbUpsellCodes();
+        var otbArrearsCodes= personMatcher.getOtbArrearsCodes();
+        var otbTrbCodes    = personMatcher.getOtbTrbCodes();
 
-        if (agents.isEmpty() || customers.isEmpty() || chnCodes.isEmpty()) {
-            log.warn("[OutboundFactory] 상담사·고객·CHN 카테고리 없음 — Step1 스킵");
+        if (agents.isEmpty() || customers.isEmpty() || otbChnCodes.isEmpty()) {
+            log.warn("[OutboundFactory] 상담사·고객·OTB 카테고리 없음 — Step1 스킵");
             return new BatchResult(List.of(), List.of());
         }
 
         String resultSql = """
                 INSERT INTO consultation_results
                     (emp_id, customer_id, channel, category_code, duration_sec,
-                     iam_issue, iam_action, iam_memo, consultation_type, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OUTBOUND', ?)
+                     iam_issue, iam_action, iam_memo, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
-        List<Long>    consultIds    = new ArrayList<>(batchSize);
-        List<String>  categoryCodes = new ArrayList<>(batchSize);
-        List<Integer> empIds        = new ArrayList<>(batchSize);
-        List<Long>    customerIds   = new ArrayList<>(batchSize);
+        List<Long>    consultIds          = new ArrayList<>(batchSize);
+        List<String>  categoryCodes       = new ArrayList<>(batchSize);
+        List<Integer> empIds              = new ArrayList<>(batchSize);
+        List<Long>    customerIds         = new ArrayList<>(batchSize);
+        List<String>  categoryTypes       = new ArrayList<>(batchSize);
+        List<String>  callResults         = new ArrayList<>(batchSize);
+        List<Boolean> cancelProcesseds    = new ArrayList<>(batchSize);
+        List<String>  targetMobileCodes   = new ArrayList<>(batchSize);
+        List<String>  customerMobileCodes = new ArrayList<>(batchSize);
 
         List<Object[]> rawArgs = new ArrayList<>(batchSize);
 
         for (int i = 0; i < batchSize; i++) {
             var agent    = agents.get(random.nextInt(agents.size()));
             var customer = customers.get(random.nextInt(customers.size()));
-            String categoryType = pickCategoryType(random.nextInt(100)); // CHN 60% / FEE 25% / TRB 15%
-            List<String> codePool = switch (categoryType) {
-                case "FEE" -> feeCodes.isEmpty() ? chnCodes : feeCodes;
-                case "TRB" -> trbCodes.isEmpty() ? chnCodes : trbCodes;
-                default    -> chnCodes;
+            String categoryType = pickCategoryType(random.nextInt(100)); // CHN 50% / UPSELL 15% / ARREARS 10% / TRB 25%
+            List<String> otbPool = switch (categoryType) {
+                case "UPSELL"  -> otbUpsellCodes;
+                case "ARREARS" -> otbArrearsCodes;
+                case "TRB"     -> otbTrbCodes;
+                default        -> otbChnCodes;
             };
-            String categoryCode = codePool.get(random.nextInt(codePool.size()));
+            String categoryCode = otbPool.get(random.nextInt(otbPool.size())); // M_OTB_* (타입 연동)
             int durationSec = 120 + random.nextInt(481); // CALL: 120~600s
 
             String outboundCategoryKey = pickOutboundCategoryKey(categoryType, random.nextInt(100));
+
+            // UPSELL CONVERTED 시 변경 대상 요금제 코드·명칭 사전 선택
+            boolean willConvert = "CONVERTED".equals(outboundCategoryKey);
+            boolean isUpsellConverted = willConvert && "UPSELL".equals(categoryType)
+                    && cacheDummy.getMobileProductCodes() != null
+                    && !cacheDummy.getMobileProductCodes().isEmpty();
+            String targetMobileCode = isUpsellConverted
+                    ? pickDifferentCode("mobile",
+                            customer.mobileCode() != null ? customer.mobileCode() : "", random)
+                    : null;
+            String targetMobilePlanName = targetMobileCode != null
+                    ? productRepository.findProductName(targetMobileCode)
+                    : null;
+
+            OutboundRawTextGenerator.CustomerContext ctx = new OutboundRawTextGenerator.CustomerContext(
+                    customer.name(),
+                    customer.mobilePlanName(),
+                    customer.homePlanName(),
+                    targetMobilePlanName
+            );
             OutboundTextResult textResult = outboundRawTextGenerator.generate(
-                    categoryType, outboundCategoryKey, new Random(ThreadLocalRandom.current().nextLong()));
+                    categoryType, outboundCategoryKey,
+                    new Random(ThreadLocalRandom.current().nextLong()), ctx);
 
             final int    empId   = agent.empId();
             final long   custId  = customer.customerId();
@@ -149,6 +181,11 @@ public class OutboundConsultationFactory {
             categoryCodes.add(categoryCode);
             empIds.add(empId);
             customerIds.add(custId);
+            categoryTypes.add(categoryType);
+            callResults.add(textResult.callResult());
+            cancelProcesseds.add(textResult.cancelProcessed());
+            targetMobileCodes.add(targetMobileCode);
+            customerMobileCodes.add(customer.mobileCode());
             rawArgs.add(new Object[]{consultId, textResult.rawTextJson()});
         }
 
@@ -161,6 +198,8 @@ public class OutboundConsultationFactory {
         // ── 연관 테이블 Bulk INSERT ──────────────────────────────────────────
         insertClientReviews(consultIds, random);
         insertCustomerRiskLogs(consultIds, empIds, customerIds, random);
+        insertProductLogs(consultIds, customerIds, categoryTypes, callResults,
+                cancelProcesseds, targetMobileCodes, customerMobileCodes, random);
 
         log.info("[OutboundFactory] Step1 완료 — {}건 생성 | consultId 범위: {} ~ {}",
                 batchSize, consultIds.get(0), consultIds.get(consultIds.size() - 1));
@@ -180,8 +219,8 @@ public class OutboundConsultationFactory {
         jdbcTemplate.batchUpdate(
                 """
                 INSERT INTO result_event_status
-                    (consult_id, category_code, consultation_type, status, retry_count, created_at, updated_at)
-                VALUES (?, ?, 'OUTBOUND', 'REQUESTED', 0, NOW(), NOW())
+                    (consult_id, category_code, status, retry_count, created_at, updated_at)
+                VALUES (?, ?, 'REQUESTED', 0, NOW(), NOW())
                 """,
                 args
         );
@@ -253,6 +292,112 @@ public class OutboundConsultationFactory {
         }
     }
 
+    /**
+     * consult_product_logs — 아웃바운드 상담에서 실제 처리된 상품 변경 이력.
+     *
+     * <ul>
+     *   <li>CONVERTED + CHN → RENEW (재약정 성공): 고객 현재 모바일 코드 사용</li>
+     *   <li>CONVERTED + UPSELL → CHANGE (상위 요금제 전환): 신규=targetMobileCode, 기존=customerMobileCode</li>
+     *   <li>CONVERTED + TRB → 로그 없음 (기술 점검·보상, 상품 변경 없음)</li>
+     *   <li>CONVERTED + ARREARS → 로그 없음 (납부 완료, 상품 변경 없음)</li>
+     *   <li>REJECTED + cancelProcessed → CANCEL: 고객 현재 모바일 코드 사용</li>
+     *   <li>REJECTED (일반 거절) → 로그 없음</li>
+     * </ul>
+     */
+    private void insertProductLogs(List<Long> consultIds, List<Long> customerIds,
+                                   List<String> categoryTypes, List<String> callResults,
+                                   List<Boolean> cancelProcesseds, List<String> targetMobileCodes,
+                                   List<String> customerMobileCodes, ThreadLocalRandom random) {
+        boolean hasCodes = cacheDummy.getMobileProductCodes() != null
+                && !cacheDummy.getMobileProductCodes().isEmpty();
+        if (!hasCodes) return;
+
+        List<Object[]> args = new ArrayList<>();
+        for (int i = 0; i < consultIds.size(); i++) {
+            boolean isConverted     = "CONVERTED".equals(callResults.get(i));
+            boolean cancelProcessed = cancelProcesseds.get(i);
+            String  categoryType    = categoryTypes.get(i);
+            String  custMobileCode  = customerMobileCodes.get(i);
+
+            if (!isConverted) {
+                // REJECTED: 상담사가 실제 해지를 처리한 경우만 CANCEL 로그
+                if (cancelProcessed && custMobileCode != null) {
+                    args.add(buildProductLogArgs(
+                            consultIds.get(i), customerIds.get(i),
+                            "CANCEL", "mobile", custMobileCode, null));
+                }
+                continue;
+            }
+
+            // TRB·ARREARS CONVERTED: 상품 변경 없음
+            if ("TRB".equals(categoryType) || "ARREARS".equals(categoryType)) continue;
+
+            if ("CHN".equals(categoryType)) {
+                // 재약정: 고객 기존 상품 코드 유지
+                String code = custMobileCode != null ? custMobileCode : pickProductCode("mobile", random);
+                args.add(buildProductLogArgs(
+                        consultIds.get(i), customerIds.get(i),
+                        "RENEW", "mobile", code, null));
+            } else if ("UPSELL".equals(categoryType)) {
+                // 상위 요금제 전환: 신규 상품(targetMobileCode) → 기존 상품(customerMobileCode)
+                String targetCode = targetMobileCodes.get(i);
+                String newCode  = targetCode != null ? targetCode : pickProductCode("mobile", random);
+                String oldCode  = custMobileCode != null ? custMobileCode
+                        : pickDifferentCode("mobile", newCode, random);
+                args.add(buildProductLogArgs(
+                        consultIds.get(i), customerIds.get(i),
+                        "CHANGE", "mobile", newCode, oldCode));
+            }
+        }
+        if (!args.isEmpty()) {
+            jdbcTemplate.batchUpdate(
+                    "INSERT INTO consult_product_logs " +
+                    "(consult_id, customer_id, contract_type, product_type, " +
+                    "new_product_home, new_product_mobile, new_product_service, " +
+                    "canceled_product_home, canceled_product_mobile, canceled_product_service) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    args
+            );
+        }
+    }
+
+    /** product_type × contract_type 조합으로 10개 컬럼 Object[] 생성 */
+    private Object[] buildProductLogArgs(long consultId, long customerId,
+                                         String contractType, String productType,
+                                         String code1, String code2) {
+        String[] cols = new String[6]; // [new_home, new_mobile, new_service, cancel_home, cancel_mobile, cancel_service]
+        int newIdx    = switch (productType) { case "home" -> 0; case "mobile" -> 1; default -> 2; };
+        int cancelIdx = newIdx + 3;
+
+        if ("NEW".equals(contractType) || "RENEW".equals(contractType)) cols[newIdx]    = code1;
+        else if ("CANCEL".equals(contractType))                          cols[cancelIdx] = code1;
+        else if ("CHANGE".equals(contractType)) { cols[newIdx] = code1; cols[cancelIdx] = code2; }
+
+        return new Object[]{consultId, customerId, contractType, productType,
+                cols[0], cols[1], cols[2], cols[3], cols[4], cols[5]};
+    }
+
+    private String pickProductCode(String productType, ThreadLocalRandom random) {
+        List<String> pool = switch (productType) {
+            case "home"   -> cacheDummy.getHomeProductCodes();
+            case "mobile" -> cacheDummy.getMobileProductCodes();
+            default       -> cacheDummy.getAdditionalProductCodes();
+        };
+        return pool.get(random.nextInt(pool.size()));
+    }
+
+    private String pickDifferentCode(String productType, String exclude, ThreadLocalRandom random) {
+        List<String> pool = switch (productType) {
+            case "home"   -> cacheDummy.getHomeProductCodes();
+            case "mobile" -> cacheDummy.getMobileProductCodes();
+            default       -> cacheDummy.getAdditionalProductCodes();
+        };
+        if (pool.size() == 1) return pool.get(0);
+        String code;
+        do { code = pool.get(random.nextInt(pool.size())); } while (code.equals(exclude));
+        return code;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  유틸리티
     // ─────────────────────────────────────────────────────────────────────────
@@ -274,63 +419,70 @@ public class OutboundConsultationFactory {
     /**
      * outbound_category code_name을 분포에 따라 선택한다.
      *
-     * <p>분포 설계:
+     * <p>분포 설계 (카테고리 유형별):
      * <ul>
-     *   <li>CONVERTED (전환 성공): 45%</li>
-     *   <li>COST (요금/비용 문제): 16% — 가장 흔한 거절 사유</li>
-     *   <li>SWITCH (타사 전환): 11%</li>
-     *   <li>DISSATISFIED (서비스 불만): 10%</li>
-     *   <li>NO_NEED (필요 없음): 8%</li>
-     *   <li>CONSIDER (고려 중): 6%</li>
-     *   <li>OTHER (기타): 4%</li>
+     *   <li>CHN    (50%): CONVERTED 10% / COST 26% / SWITCH 16% / DISSATISFIED 16% / NO_NEED 13% / CONSIDER 10% / OTHER 9%</li>
+     *   <li>TRB    (25%): CONVERTED 35% / DISSATISFIED 35% / CONSIDER 14% / SWITCH 10% / OTHER 6%</li>
+     *   <li>UPSELL (15%): CONVERTED 60% / COST 20% / CONSIDER 10% / NO_NEED 7% / OTHER 3%</li>
+     *   <li>ARREARS(10%): CONVERTED 75% / CONSIDER 12% / NO_NEED 8% / OTHER 5%</li>
      * </ul>
      *
-     * @param categoryType "CHN" | "FEE" | "TRB"
+     * @param categoryType "CHN" | "TRB" | "UPSELL" | "ARREARS"
      * @param roll         0~99 난수
      * @return "CONVERTED" 또는 analysis_code.outbound_category code_name
      */
     private String pickOutboundCategoryKey(String categoryType, int roll) {
         return switch (categoryType) {
-            case "FEE" -> pickFeeOutboundCategoryKey(roll);
-            case "TRB" -> pickTrbOutboundCategoryKey(roll);
-            default    -> pickChnOutboundCategoryKey(roll);
+            case "UPSELL"  -> pickUpsellOutboundCategoryKey(roll);
+            case "ARREARS" -> pickArrearsOutboundCategoryKey(roll);
+            case "TRB"     -> pickTrbOutboundCategoryKey(roll);
+            default        -> pickChnOutboundCategoryKey(roll);
         };
     }
 
-    /** CHN: CONVERTED 45% / COST 16% / SWITCH 11% / DISSATISFIED 10% / NO_NEED 8% / CONSIDER 6% / OTHER 4% */
+    /** CHN: CONVERTED 10% / COST 26% / SWITCH 16% / DISSATISFIED 16% / NO_NEED 13% / CONSIDER 10% / OTHER 9% */
     private String pickChnOutboundCategoryKey(int roll) {
-        if (roll < 45) return "CONVERTED";
-        if (roll < 61) return "COST";
-        if (roll < 72) return "SWITCH";
-        if (roll < 82) return "DISSATISFIED";
-        if (roll < 90) return "NO_NEED";
-        if (roll < 96) return "CONSIDER";
+        if (roll < 10) return "CONVERTED";
+        if (roll < 36) return "COST";
+        if (roll < 52) return "SWITCH";
+        if (roll < 68) return "DISSATISFIED";
+        if (roll < 81) return "NO_NEED";
+        if (roll < 91) return "CONSIDER";
         return "OTHER";
     }
 
-    /** FEE: CONVERTED 40% / COST 35% / CONSIDER 12% / SWITCH 8% / OTHER 5% */
-    private String pickFeeOutboundCategoryKey(int roll) {
-        if (roll < 40) return "CONVERTED";
-        if (roll < 75) return "COST";
+    /** UPSELL: CONVERTED 60% / COST 20% / CONSIDER 10% / NO_NEED 7% / OTHER 3% */
+    private String pickUpsellOutboundCategoryKey(int roll) {
+        if (roll < 60) return "CONVERTED";
+        if (roll < 80) return "COST";
+        if (roll < 90) return "CONSIDER";
+        if (roll < 97) return "NO_NEED";
+        return "OTHER";
+    }
+
+    /** ARREARS: CONVERTED 75% / CONSIDER 12% / NO_NEED 8% / OTHER 5% */
+    private String pickArrearsOutboundCategoryKey(int roll) {
+        if (roll < 75) return "CONVERTED";
         if (roll < 87) return "CONSIDER";
-        if (roll < 95) return "SWITCH";
+        if (roll < 95) return "NO_NEED";
         return "OTHER";
     }
 
-    /** TRB: CONVERTED 45% / DISSATISFIED 30% / CONSIDER 12% / SWITCH 8% / OTHER 5% */
+    /** TRB: CONVERTED 35% / DISSATISFIED 35% / CONSIDER 14% / SWITCH 10% / OTHER 6% */
     private String pickTrbOutboundCategoryKey(int roll) {
-        if (roll < 45) return "CONVERTED";
-        if (roll < 75) return "DISSATISFIED";
-        if (roll < 87) return "CONSIDER";
-        if (roll < 95) return "SWITCH";
+        if (roll < 35) return "CONVERTED";
+        if (roll < 70) return "DISSATISFIED";
+        if (roll < 84) return "CONSIDER";
+        if (roll < 94) return "SWITCH";
         return "OTHER";
     }
 
-    /** 카테고리 유형 선택: CHN 60% / FEE 25% / TRB 15% */
+    /** 카테고리 유형 선택: CHN 50% / TRB 25% / UPSELL 15% / ARREARS 10% */
     private String pickCategoryType(int roll) {
-        if (roll < 60) return "CHN";
-        if (roll < 85) return "FEE";
-        return "TRB";
+        if (roll < 50) return "CHN";
+        if (roll < 75) return "TRB";
+        if (roll < 90) return "UPSELL";
+        return "ARREARS";
     }
 
     private LocalDateTime randomBusinessTime(LocalDate targetDate, ThreadLocalRandom random) {

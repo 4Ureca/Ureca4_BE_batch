@@ -69,7 +69,8 @@ public class ExtractionScheduler {
 
         Map<String, List<ResultEventStatus>> byType = pendingTasks.stream()
                 .collect(Collectors.groupingBy(t ->
-                        t.getConsultationType() == null ? "INBOUND" : t.getConsultationType()
+                        t.getCategoryCode() != null && t.getCategoryCode().startsWith("M_OTB")
+                                ? "OUTBOUND" : "INBOUND"
                 ));
 
         for (List<ResultEventStatus> typeGroup : byType.values()) {
@@ -112,8 +113,7 @@ public class ExtractionScheduler {
                 .map(task -> new BundleItem(
                         task.getConsultId(),
                         task.getCategoryCode(),
-                        rawTextMap.getOrDefault(task.getConsultId(), ""),
-                        task.getConsultationType()
+                        rawTextMap.getOrDefault(task.getConsultId(), "")
                 ))
                 .toList();
 
@@ -156,7 +156,7 @@ public class ExtractionScheduler {
                 return;
             }
 
-            boolean isOutbound = "OUTBOUND".equals(task.getConsultationType());
+            boolean isOutbound = task.getCategoryCode() != null && task.getCategoryCode().startsWith("M_OTB");
 
             AiExtractionResponse extractionRes;
             String actionsJson;

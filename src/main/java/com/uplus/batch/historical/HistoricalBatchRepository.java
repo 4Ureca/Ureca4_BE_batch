@@ -98,6 +98,14 @@ public class HistoricalBatchRepository {
         );
     }
 
+    /** COMPLETED 상태인 날짜들을 PENDING으로 초기화 (재실행 용도) */
+    public int resetCompletedDates() {
+        return jdbcTemplate.update(
+                "UPDATE historical_batch_log SET status='PENDING', mysql_done=0, ai_done=0, mongo_done=0, " +
+                "fail_reason=NULL, started_at=NULL, completed_at=NULL, updated_at=NOW() WHERE status='COMPLETED'"
+        );
+    }
+
     /** 전체 진행 현황 조회 (컨트롤러 status 엔드포인트용) */
     public List<java.util.Map<String, Object>> findAllStatus() {
         return jdbcTemplate.queryForList(

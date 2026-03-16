@@ -131,6 +131,29 @@ public class RawTextGenerator {
      * </ul>
      */
     public String generate(String categoryCode, String channel, Random random) {
+        List<Turn> turns = generateTurns(categoryCode, channel, random);
+        return serialize(turns);
+    }
+
+    /**
+     * 고객 이름과 상품명을 반영하여 개인화된 원문을 생성한다.
+     *
+     * @param customerName 고객 이름 (null이면 "고객님" 유지)
+     * @param planName     현재 이용 중인 상품명 (null이면 기존 패턴 유지)
+     */
+    public String generate(String categoryCode, String channel, Random random,
+                           String customerName, String planName) {
+        List<Turn> turns = generateTurns(categoryCode, channel, random);
+        turns = personalize(turns, customerName, planName);
+        return serialize(turns);
+    }
+
+    /** 하위 호환 — channel 미지정 시 CALL로 처리 */
+    public String generate(String categoryCode, Random random) {
+        return generate(categoryCode, "CALL", random);
+    }
+
+    private List<Turn> generateTurns(String categoryCode, String channel, Random random) {
         // 1. 본문 템플릿 선택
         boolean isChurnCategory = categoryCode != null && categoryCode.startsWith("M_CHN");
         boolean isChurnOverride  = !isChurnCategory && random.nextInt(100) < 15;
@@ -152,13 +175,34 @@ public class RawTextGenerator {
         full.add((isChat ? CHAT_GREETINGS : CALL_GREETINGS).get(random.nextInt(CALL_GREETINGS.size())));
         full.addAll(injectQuality(body, criteria, random));
         full.addAll(buildDynamicClosing(criteria, isChat, random));
-
-        return serialize(full);
+        return full;
     }
 
-    /** 하위 호환 — channel 미지정 시 CALL로 처리 */
-    public String generate(String categoryCode, Random random) {
-        return generate(categoryCode, "CALL", random);
+    /**
+     * 대화 턴 목록에 고객 이름과 현재 구독 상품명을 적용한다.
+     * <ol>
+     *   <li>전체 발화: "고객님" → "{name}님"</li>
+     *   <li>상담사 발화: 현재 상품명을 key 패턴에 삽입</li>
+     * </ol>
+     */
+    private List<Turn> personalize(List<Turn> turns, String customerName, String planName) {
+        List<Turn> result = new ArrayList<>(turns.size());
+        for (Turn t : turns) {
+            String text = t.text();
+            if (customerName != null) {
+                text = text.replace("고객님", customerName + "님");
+            }
+            if (planName != null && "상담사".equals(t.speaker())) {
+                text = text.replace("현재 1기가 인터넷과 베이직 TV 이용 중이시고",
+                        "현재 " + planName + " 이용 중이시고");
+                text = text.replace("현재 결합 요금제 이용 중이신데",
+                        "현재 " + planName + " 이용 중이신데");
+                text = text.replace("U+ 5G 프리미어 요금제 이용 중이시고",
+                        planName + " 이용 중이시고");
+            }
+            result.add(new Turn(t.speaker(), text));
+        }
+        return result;
     }
 
     // ───────────────────────────────────────────────

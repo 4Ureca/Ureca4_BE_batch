@@ -45,6 +45,22 @@ public class OutboundRawTextGenerator {
     private record Turn(String speaker, String text) {}
 
     /**
+     * 원문 개인화에 필요한 고객 컨텍스트.
+     * Factory가 DB에서 로드한 고객 정보를 이 형태로 전달한다.
+     *
+     * @param name                 고객 이름 (예: "홍길동")
+     * @param mobilePlanName       현재 활성 모바일 상품명 (예: "5G 프리미어 에센셜", nullable)
+     * @param homePlanName         현재 활성 홈/인터넷 상품명 (예: "기가인터넷 1G", nullable)
+     * @param targetMobilePlanName 변경 대상 모바일 상품명 (nullable)
+     */
+    public record CustomerContext(
+            String name,
+            String mobilePlanName,
+            String homePlanName,
+            String targetMobilePlanName
+    ) {}
+
+    /**
      * 아웃바운드 원문 생성 결과.
      * 모든 필드가 결정론적으로 설정되어 있으며, Factory는 이 값을 그대로 DB에 삽입한다.
      */
@@ -55,7 +71,8 @@ public class OutboundRawTextGenerator {
             String complaintCategory,  // analysis_code.code_name (complaint_category 분류)
             String defenseCategory,    // analysis_code.code_name (defense_category 분류)
             String iamIssue,           // consultation_results.iam_issue
-            String iamAction           // consultation_results.iam_action
+            String iamAction,          // consultation_results.iam_action
+            boolean cancelProcessed    // REJECTED 상담에서 상담사가 실제 해지를 처리한 경우 true
     ) {}
 
     private record OutboundTemplate(
@@ -69,27 +86,35 @@ public class OutboundRawTextGenerator {
     ) {}
 
     /** CHN 계열 (해지/재약정) 템플릿 */
-    private static final List<OutboundTemplate> TEMPLATES     = new ArrayList<>();
-    /** FEE 계열 (요금 불만 이탈 위험) 템플릿 */
-    private static final List<OutboundTemplate> FEE_TEMPLATES = new ArrayList<>();
+    private static final List<OutboundTemplate> TEMPLATES        = new ArrayList<>();
+    /** UPSELL 계열 (업셀링: 상위 요금제 업그레이드 유도) 템플릿 */
+    private static final List<OutboundTemplate> UPSELL_TEMPLATES = new ArrayList<>();
+    /** ARREARS 계열 (연체안내: 미납 고객 납부 안내) 템플릿 */
+    private static final List<OutboundTemplate> ARREARS_TEMPLATES = new ArrayList<>();
     /** TRB 계열 (품질 불만 이탈 위험) 템플릿 */
-    private static final List<OutboundTemplate> TRB_TEMPLATES = new ArrayList<>();
+    private static final List<OutboundTemplate> TRB_TEMPLATES    = new ArrayList<>();
 
-    private static final Map<String, List<OutboundTemplate>> TEMPLATE_MAP     = new LinkedHashMap<>();
-    private static final Map<String, List<OutboundTemplate>> FEE_TEMPLATE_MAP = new LinkedHashMap<>();
-    private static final Map<String, List<OutboundTemplate>> TRB_TEMPLATE_MAP = new LinkedHashMap<>();
+    private static final Map<String, List<OutboundTemplate>> TEMPLATE_MAP        = new LinkedHashMap<>();
+    private static final Map<String, List<OutboundTemplate>> UPSELL_TEMPLATE_MAP = new LinkedHashMap<>();
+    private static final Map<String, List<OutboundTemplate>> ARREARS_TEMPLATE_MAP = new LinkedHashMap<>();
+    private static final Map<String, List<OutboundTemplate>> TRB_TEMPLATE_MAP    = new LinkedHashMap<>();
 
     static {
         buildChnTemplates();
-        buildFeeTemplates();
+        buildUpsellTemplates();
+        buildArrearsTemplates();
         buildTrbTemplates();
         for (OutboundTemplate t : TEMPLATES) {
             String key = "CONVERTED".equals(t.callResult()) ? "CONVERTED" : t.outboundCategory();
             TEMPLATE_MAP.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
         }
-        for (OutboundTemplate t : FEE_TEMPLATES) {
+        for (OutboundTemplate t : UPSELL_TEMPLATES) {
             String key = "CONVERTED".equals(t.callResult()) ? "CONVERTED" : t.outboundCategory();
-            FEE_TEMPLATE_MAP.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
+            UPSELL_TEMPLATE_MAP.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
+        }
+        for (OutboundTemplate t : ARREARS_TEMPLATES) {
+            String key = "CONVERTED".equals(t.callResult()) ? "CONVERTED" : t.outboundCategory();
+            ARREARS_TEMPLATE_MAP.computeIfAbsent(key, k -> new ArrayList<>()).add(t);
         }
         for (OutboundTemplate t : TRB_TEMPLATES) {
             String key = "CONVERTED".equals(t.callResult()) ? "CONVERTED" : t.outboundCategory();
@@ -114,12 +139,19 @@ public class OutboundRawTextGenerator {
         buildRejectedOther();
     }
 
-    private static void buildFeeTemplates() {
-        buildFeeConverted();
-        buildFeeRejectedCost();
-        buildFeeRejectedConsider();
-        buildFeeRejectedSwitch();
-        buildFeeRejectedOther();
+    private static void buildUpsellTemplates() {
+        buildUpsellConverted();
+        buildUpsellRejectedCost();
+        buildUpsellRejectedConsider();
+        buildUpsellRejectedNoNeed();
+        buildUpsellRejectedOther();
+    }
+
+    private static void buildArrearsTemplates() {
+        buildArrearsConverted();
+        buildArrearsRejectedConsider();
+        buildArrearsRejectedNoNeed();
+        buildArrearsRejectedOther();
     }
 
     private static void buildTrbTemplates() {
@@ -1074,144 +1106,224 @@ public class OutboundRawTextGenerator {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  FEE 계열 템플릿 (요금 불만 이탈 위험 고객 대상)
+    //  UPSELL 계열 템플릿 (업셀링: 상위 요금제·서비스 업그레이드 유도)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /** FEE-CONV-1: 요금제 하향 + 부가서비스 정리 → 유지 전환 */
-    private static void buildFeeConverted() {
-        FEE_TEMPLATES.add(new OutboundTemplate(
+    /** UPSELL-CONV-1: LTE → 5G 업그레이드 수락 */
+    private static void buildUpsellConverted() {
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 최근 요금 관련 불편을 겪고 계신다는 이력이 확인되어 연락드렸습니다."),
-                c("네, 매달 요금이 너무 많이 나와서 해지를 고민하고 있었어요."),
-                a("고객님 청구 내역을 확인하니 미사용 부가서비스 3개가 등록되어 있습니다. 이를 정리하고 요금제도 한 단계 낮추시면 월 16,500원 절감이 가능합니다."),
-                c("어떤 부가서비스가 붙어 있는지 몰랐어요. 다 정리해주세요."),
-                a("지금 바로 처리해드리겠습니다. 요금제 조정까지 완료하면 다음 달부터 절감된 요금으로 청구됩니다."),
-                c("그렇게 해주신다면 유지하겠습니다."),
-                a("감사합니다. 부가서비스 해지 및 요금제 최적화 처리 완료해드리겠습니다. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 현재 LTE 요금제를 이용 중이신데, 5G 요금제로 업그레이드하시면 더욱 빠른 속도를 경험하실 수 있어 안내드리고자 연락드렸습니다."),
+                c("5G로 바꾸면 요금이 많이 오르나요?"),
+                a("현재 요금 대비 월 3,300원 추가로 5G 무제한 데이터와 속도 3배 향상을 누리실 수 있습니다. 지금 업그레이드하시면 첫 3개월 요금 동결 혜택도 드립니다."),
+                c("그 정도면 괜찮네요. 5G로 변경할게요."),
+                a("감사합니다. 5G 요금제 업그레이드 처리 완료해드리겠습니다. 좋은 하루 보내세요.")
             ),
-            "CONVERTED", null, "COST_HIGH", "OPT_DOWNGRADE",
-            "요금 과다 이탈 위험 고객 요금 최적화 제안 아웃바운드",
-            "부가서비스 정리 및 요금제 하향 조정 후 유지 전환 완료"
+            "CONVERTED", null, "COST_HIGH", "PLAN_CHANGE",
+            "LTE 고객 5G 업그레이드 제안 아웃바운드",
+            "5G 요금제 업그레이드 및 첫 3개월 동결 혜택 안내 후 수락 완료"
         ));
 
-        /** FEE-CONV-2: 직접 할인 제안 수락 */
-        FEE_TEMPLATES.add(new OutboundTemplate(
+        /** UPSELL-CONV-2: 기가인터넷 업그레이드 수락 */
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 요금 부담 관련하여 도움드리고자 연락드렸습니다."),
-                c("사실 요금이 부담돼서 다른 통신사 알아보고 있었어요."),
-                a("불편을 드려 죄송합니다. 고객님께 재약정 시 월 13,200원 직접 할인을 제공해드릴 수 있습니다. 연간 158,400원 절감 효과입니다."),
-                c("그 정도면 확실히 부담이 줄겠네요."),
-                a("추가로 결합 할인 재적용도 함께 진행해드릴 수 있습니다."),
-                c("그렇게 해주신다면 U+에서 유지하겠습니다."),
-                a("감사합니다. 직접 할인 및 결합 재적용 처리 완료해드리겠습니다. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 현재 500M 인터넷 이용 중이신데, 기가인터넷으로 업그레이드하시면 재택근무와 스트리밍이 훨씬 쾌적해지십니다. 안내드리고자 연락드렸습니다."),
+                c("요즘 재택근무 때문에 느리긴 했어요. 얼마나 차이 나나요?"),
+                a("현재 요금에서 월 5,500원 추가로 속도가 2배 이상 향상됩니다. 이번 달 업그레이드 시 공유기도 무상 교체해드립니다."),
+                c("공유기까지 바꿔준다고요? 그럼 업그레이드 진행할게요."),
+                a("감사합니다. 기가인터넷 업그레이드 및 공유기 교체 일정 안내드리겠습니다. 편안한 하루 되세요.")
             ),
-            "CONVERTED", null, "COST_HIGH", "BNFT_DISCOUNT",
-            "요금 부담 타사 검토 고객 직접 할인 제안 아웃바운드",
-            "재약정 직접 할인 및 결합 재적용 안내 후 유지 전환 완료"
+            "CONVERTED", null, "ENV_UNUSED", "PLAN_CHANGE",
+            "500M 인터넷 고객 기가인터넷 업그레이드 제안 아웃바운드",
+            "기가인터넷 업그레이드 및 공유기 무상 교체 안내 후 수락 완료"
         ));
 
-        /** FEE-CONV-3: 청구 오류 정정 + 요금 최적화 */
-        FEE_TEMPLATES.add(new OutboundTemplate(
+        /** UPSELL-CONV-3: 결합 상품 업그레이드 + 결합 할인 확대 */
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 고객만족팀입니다. 최근 청구 관련 불편이 있으셨다는 이력이 확인되어 연락드렸습니다."),
-                c("네, 지난달 요금이 갑자기 많이 나와서 뭔가 잘못된 것 같았어요."),
-                a("청구 내역 확인해보니 할인 적용이 누락되어 있었습니다. 즉시 정정 처리해드리고 이번 달 청구에서 차감해드리겠습니다."),
-                c("그랬군요. 얼마나 잘못 청구된 건가요?"),
-                a("총 22,000원이 과청구되었습니다. 이번 달 청구서에서 전액 공제해드리겠습니다. 추가로 요금 최적화 방안도 안내드릴까요?"),
-                c("네, 같이 확인해 주세요."),
-                a("감사합니다. 과청구 정정 및 요금 최적화 처리 완료해드리겠습니다. 불편을 드려 죄송합니다. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 현재 모바일과 인터넷을 각각 이용 중이신데, 결합 상품으로 통합하시면 월 최대 22,000원 절감이 가능합니다. 안내드리고자 연락드렸습니다."),
+                c("결합하면 요금이 그렇게 많이 줄어요?"),
+                a("네, 모바일 요금제를 한 단계 상향하고 결합 할인을 적용하시면 오히려 현재보다 저렴해집니다. 결합 시 OTT 서비스도 무료 제공됩니다."),
+                c("OTT까지 무료면 좋겠네요. 결합으로 변경 진행할게요."),
+                a("감사합니다. 결합 상품 업그레이드 및 OTT 혜택 처리 완료해드리겠습니다. 좋은 하루 보내세요.")
             ),
-            "CONVERTED", null, "ETC_BILLING", "ADM_GUIDE",
-            "청구 오류 이탈 위험 고객 정정 및 최적화 제안 아웃바운드",
-            "과청구 정정 및 요금 최적화 안내 후 유지 전환 완료"
+            "CONVERTED", null, "COST_HIGH", "CONTRACT_RENEW",
+            "모바일+인터넷 분리 고객 결합 업그레이드 제안 아웃바운드",
+            "결합 상품 통합 업그레이드 및 OTT 혜택 안내 후 수락 완료"
         ));
     }
 
-    /** FEE-COST-1: 최대 할인 제안했으나 경쟁사보다 여전히 비쌈 */
-    private static void buildFeeRejectedCost() {
-        FEE_TEMPLATES.add(new OutboundTemplate(
+    /** UPSELL-COST-1: 추가 요금 부담으로 업그레이드 거절 */
+    private static void buildUpsellRejectedCost() {
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 요금 부담 관련하여 도움드리고자 연락드렸습니다."),
-                c("네, 요금이 너무 비싸서 KT로 이동하려고 알아보고 있어요."),
-                a("고객님을 위해 월 최대 16,500원 직접 할인을 제공해드릴 수 있습니다."),
-                c("KT 신규 가입 혜택이 훨씬 더 많아요. 그쪽이 첫 6개월은 거의 절반 요금이거든요."),
-                a("추가로 사은품 지원도 가능합니다. 타사 혜택과 장기적으로 비교해보시면 U+가 유리합니다."),
-                c("당장 요금 절감이 필요한 상황이라 타사로 가겠습니다."),
-                a("고객님 결정 이해합니다. 추후 다시 필요하시면 언제든 연락 주세요. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 현재 LTE 요금제에서 5G로 업그레이드하시면 속도가 크게 향상됩니다. 안내드리고자 연락드렸습니다."),
+                c("5G가 좋은 건 알지만 지금도 요금이 부담스러워서 더 올리기 어렵습니다."),
+                a("이해합니다. 첫 6개월 요금 동결 혜택을 적용해드리면 부담을 줄이실 수 있습니다."),
+                c("그래도 6개월 이후가 걱정되네요. 지금은 그냥 유지하겠습니다."),
+                a("고객님 결정 이해합니다. 혜택이 변경되면 다시 안내드리겠습니다. 좋은 하루 보내세요.")
             ),
-            "REJECTED", "COST", "COST_HIGH", "BNFT_DISCOUNT",
-            "요금 불만 타사 전환 고객 할인 제안 아웃바운드",
-            "최대 할인 제안하였으나 경쟁사 요금 대비 비용 사유로 거절 확인"
+            "REJECTED", "COST", "COST_HIGH", "ADM_GUIDE",
+            "LTE 고객 5G 업그레이드 제안 아웃바운드",
+            "요금 동결 혜택 안내하였으나 비용 부담 사유로 업그레이드 거절 확인"
         ));
 
-        /** FEE-COST-2: 할인폭 기대에 미치지 못함 */
-        FEE_TEMPLATES.add(new OutboundTemplate(
+        /** UPSELL-COST-2: 인터넷 업그레이드 요금 부담 거절 */
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 요금 부담 관련하여 도움드리고자 연락드렸습니다."),
-                c("요금이 매달 부담돼서 고민이에요."),
-                a("고객님께 월 11,000원 직접 할인 혜택을 제공해드릴 수 있습니다."),
-                c("그 정도로는 부족해요. 최소 2만원 이상 줄어야 유지할 수 있어요."),
-                a("현재 시스템상 최대 할인 범위가 11,000원입니다. 요금제 하향 조정도 함께 적용하면 추가 절감도 가능합니다."),
-                c("그래도 여전히 제가 원하는 만큼이 안 되네요. 이번 달로 해지하겠습니다."),
-                a("고객님 결정 존중합니다. 불편을 드려 죄송합니다. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 기가인터넷 업그레이드 혜택을 안내드리고자 연락드렸습니다."),
+                c("솔직히 지금 인터넷도 요금이 부담되는데 더 올리는 건 어렵습니다."),
+                a("현재 요금에서 월 5,500원만 추가하시면 됩니다. 이번 달 신청 시 첫 달 무료 혜택도 있습니다."),
+                c("지금은 조금 어렵습니다. 다음에 기회가 되면 연락드릴게요."),
+                a("네, 언제든 문의 주세요. 좋은 하루 보내세요.")
             ),
-            "REJECTED", "COST", "COST_HIGH", "OPT_DOWNGRADE",
-            "요금 절감 기대 고객 할인 제안 아웃바운드",
-            "요금제 조정 및 할인 제안하였으나 절감 폭 불만족으로 거절 확인"
+            "REJECTED", "COST", "COST_HIGH", "ADM_GUIDE",
+            "인터넷 고객 기가인터넷 업그레이드 제안 아웃바운드",
+            "첫 달 무료 혜택 안내하였으나 비용 부담 사유로 업그레이드 거절 확인"
         ));
     }
 
-    /** FEE-CONSIDER-1: 할인 조건 검토 후 결정 유보 */
-    private static void buildFeeRejectedConsider() {
-        FEE_TEMPLATES.add(new OutboundTemplate(
+    /** UPSELL-CONSIDER-1: 비교 검토 후 결정 유보 */
+    private static void buildUpsellRejectedConsider() {
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 요금 부담 관련하여 도움드리고자 연락드렸습니다."),
-                c("요금이 부담되긴 한데, 지금 당장 결정하기가 어려워요."),
-                a("고객님을 위해 월 13,200원 직접 할인과 요금제 최적화를 동시에 제안드릴 수 있습니다."),
-                c("조건이 나쁘지는 않은데, 다른 통신사도 좀 더 알아보고 싶어요."),
-                a("충분히 이해합니다. 이 혜택은 이번 달까지 적용 가능한 조건입니다. 언제든 결정하시면 연락 주세요."),
-                c("네, 알겠습니다. 연락드릴게요."),
-                a("감사합니다. 편하신 시간에 연락 주세요. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 5G 요금제 업그레이드 혜택을 안내드리고자 연락드렸습니다."),
+                c("5G가 좋은 건 알지만 좀 더 알아보고 결정하고 싶어요."),
+                a("충분히 이해합니다. 이번 업그레이드 프로모션은 이번 달까지 적용 가능합니다. 결정하시면 언제든 연락 주세요."),
+                c("네, 알겠습니다. 좀 더 생각해볼게요."),
+                a("언제든 문의 주세요. 좋은 하루 보내세요.")
             ),
             "REJECTED", "CONSIDER", "COST_HIGH", "ADM_GUIDE",
-            "요금 부담 이탈 위험 고객 할인 제안 아웃바운드",
-            "할인 및 요금 최적화 제안 후 고객 추가 검토 요청으로 결정 유보"
+            "LTE 고객 5G 업그레이드 제안 아웃바운드",
+            "5G 업그레이드 프로모션 안내 후 고객 추가 검토 요청으로 결정 유보"
         ));
     }
 
-    /** FEE-SWITCH-1: 이미 경쟁사로 이동 결정 */
-    private static void buildFeeRejectedSwitch() {
-        FEE_TEMPLATES.add(new OutboundTemplate(
+    /** UPSELL-NO_NEED-1: 현재 서비스로 충분하다고 거절 */
+    private static void buildUpsellRejectedNoNeed() {
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 요금 관련 안내드리고자 연락드렸습니다."),
-                c("사실 이미 SK로 번호이동 신청을 했어요."),
-                a("아, 그러셨군요. 혹시 마음이 바뀌실 경우를 대비해 저희가 제공할 수 있는 조건을 말씀드려도 될까요?"),
-                c("이미 결제까지 완료했어요. 되돌리기가 어렵습니다."),
-                a("고객님 결정 충분히 이해합니다. 그동안 U+를 이용해 주셔서 진심으로 감사드립니다."),
-                c("네, 감사합니다."),
-                a("편안한 하루 되세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 기가인터넷으로 업그레이드하시면 더 빠른 인터넷 환경을 경험하실 수 있습니다. 안내드리고자 연락드렸습니다."),
+                c("지금 속도도 충분해요. 굳이 올릴 필요가 없을 것 같아요."),
+                a("현재 이용 패턴에서는 충분하실 수 있습니다. 다만 향후 스마트홈 기기 추가 시 필요하실 수 있어 말씀드렸습니다."),
+                c("지금은 필요 없어요. 나중에 필요해지면 연락드릴게요."),
+                a("네, 언제든지 문의 주세요. 좋은 하루 보내세요.")
             ),
-            "REJECTED", "SWITCH", "COMP_BENEFIT", "ADM_CLOSE_FAIL",
-            "요금 불만 타사 이동 완료 고객 방어 아웃바운드",
-            "이미 타사 번호이동 완료로 전환 방어 불가 확인"
+            "REJECTED", "NO_NEED", "ENV_UNUSED", "ADM_GUIDE",
+            "인터넷 고객 기가인터넷 업그레이드 제안 아웃바운드",
+            "스마트홈 연계 업그레이드 안내하였으나 현재 서비스 충분 사유로 거절 확인"
         ));
     }
 
-    /** FEE-OTHER-1: 사업 이전·폐업 등 개인 사정 */
-    private static void buildFeeRejectedOther() {
-        FEE_TEMPLATES.add(new OutboundTemplate(
+    /** UPSELL-OTHER-1: 계약 종료 예정 등 기타 사유 거절 */
+    private static void buildUpsellRejectedOther() {
+        UPSELL_TEMPLATES.add(new OutboundTemplate(
             List.of(
-                a("안녕하세요, 고객님. LG U+ 입니다. 요금 관련 도움드리고자 연락드렸습니다."),
-                c("사실 이번에 사업을 정리하게 돼서 법인 회선 자체를 다 해지해야 해요."),
-                a("그러셨군요. 사업 정리로 인한 해지의 경우 위약금 면제 적용 가능한 경우도 있습니다. 확인해드릴까요?"),
-                c("그렇게 해주시면 감사하죠."),
-                a("관련 서류 안내드리겠습니다. 사업자등록증 폐업 신고 서류 지참 시 위약금 면제 처리 가능합니다."),
-                c("알겠습니다. 그냥 해지 처리 진행해주세요."),
-                a("네, 말씀해주신 사유로 해지 처리 도와드리겠습니다. 그동안 이용해 주셔서 감사합니다. 좋은 하루 보내세요.")
+                a("안녕하세요, 고객님. LG U+ 입니다. 5G 요금제 업그레이드 관련하여 안내드리고자 연락드렸습니다."),
+                c("사실 이번 달에 다른 통신사로 이동을 생각하고 있어서요."),
+                a("그러시군요. 혹시 이동 전에 저희가 제공해드릴 수 있는 혜택을 한 번만 확인해보시겠어요?"),
+                c("이미 결정한 사항이라 괜찮습니다."),
+                a("고객님 결정 이해합니다. 그동안 이용해 주셔서 감사합니다. 좋은 하루 보내세요.")
             ),
-            "REJECTED", "OTHER", "ETC_BILLING", "ADM_CLOSE_FAIL",
-            "사업 폐업 법인 회선 해지 이탈 방어 아웃바운드",
-            "위약금 면제 안내 진행하였으나 사업 정리 기타 사유로 거절 확인"
+            "REJECTED", "OTHER", "COMP_BENEFIT", "ADM_CLOSE_FAIL",
+            "타사 이동 예정 고객 업그레이드 제안 아웃바운드",
+            "업그레이드 혜택 안내하였으나 타사 이동 예정 기타 사유로 거절 확인"
+        ));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  ARREARS 계열 템플릿 (연체안내: 미납·연체 고객 납부 안내)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** ARREARS-CONV-1: 1개월 미납 안내, 즉시 납부 약속 */
+    private static void buildArrearsConverted() {
+        ARREARS_TEMPLATES.add(new OutboundTemplate(
+            List.of(
+                a("안녕하세요, 고객님. LG U+ 고객센터입니다. 지난달 요금 미납 건이 확인되어 안내드리고자 연락드렸습니다."),
+                c("아, 깜빡하고 납부를 못 했네요. 얼마나 되나요?"),
+                a("미납 금액은 43,000원입니다. 오늘 중으로 납부해주시면 연체 이자 없이 처리 가능합니다. 자동이체 등록도 도와드릴까요?"),
+                c("오늘 바로 이체할게요. 자동이체도 같이 신청해주세요."),
+                a("감사합니다. 자동이체 등록 완료해드리겠습니다. 이후에는 미납 걱정 없으실 겁니다. 좋은 하루 보내세요.")
+            ),
+            "CONVERTED", null, "ETC_BILLING", "ADM_GUIDE",
+            "1개월 미납 고객 납부 안내 아웃바운드",
+            "미납 금액 안내 및 자동이체 등록 후 즉시 납부 약속 완료"
+        ));
+
+        /** ARREARS-CONV-2: 2개월 연체, 분할 납부 약속 */
+        ARREARS_TEMPLATES.add(new OutboundTemplate(
+            List.of(
+                a("안녕하세요, 고객님. LG U+ 고객센터입니다. 2개월치 요금 미납이 확인되어 서비스 정지 전 안내드리고자 연락드렸습니다."),
+                c("많이 밀렸군요. 지금 경제적으로 어려운 상황이라 한 번에 내기가 어려워요."),
+                a("충분히 이해합니다. 2회 분할 납부도 가능합니다. 이번 달 절반, 다음 달 나머지를 납부해주시면 서비스는 유지됩니다."),
+                c("그렇게 해주신다면 가능할 것 같아요. 분할로 진행해 주세요."),
+                a("감사합니다. 분할 납부 약정 처리 완료해드리겠습니다. 안내 SMS도 발송해드리겠습니다. 좋은 하루 보내세요.")
+            ),
+            "CONVERTED", null, "ETC_BILLING", "ADM_GUIDE",
+            "2개월 연체 고객 분할 납부 안내 아웃바운드",
+            "분할 납부 약정 안내 후 납부 약속 완료"
+        ));
+
+        /** ARREARS-CONV-3: 자동이체 오류 정정 후 납부 완료 */
+        ARREARS_TEMPLATES.add(new OutboundTemplate(
+            List.of(
+                a("안녕하세요, 고객님. LG U+ 고객센터입니다. 지난달 자동이체 처리 오류로 미납이 발생하여 안내드리고자 연락드렸습니다."),
+                c("제가 자동이체를 등록해놨는데 왜 미납이 된 거죠?"),
+                a("확인해보니 등록하신 계좌의 잔액 부족으로 이체가 실패하였습니다. 지금 바로 재이체 처리를 도와드릴 수 있습니다."),
+                c("아, 그날 잔액이 부족했나 보네요. 지금 처리해주세요."),
+                a("감사합니다. 재이체 처리 완료해드리겠습니다. 계좌 잔액 여유분 유지 부탁드립니다. 좋은 하루 보내세요.")
+            ),
+            "CONVERTED", null, "ETC_BILLING", "ADM_GUIDE",
+            "자동이체 오류 미납 고객 납부 처리 아웃바운드",
+            "자동이체 오류 안내 및 재이체 처리 후 납부 완료"
+        ));
+    }
+
+    /** ARREARS-CONSIDER-1: 납부 일정 요청, 결정 유보 */
+    private static void buildArrearsRejectedConsider() {
+        ARREARS_TEMPLATES.add(new OutboundTemplate(
+            List.of(
+                a("안녕하세요, 고객님. LG U+ 고객센터입니다. 미납 요금 납부 관련하여 안내드리고자 연락드렸습니다."),
+                c("알고는 있는데 이번 주는 좀 어렵고, 다음 주에 납부하면 안 될까요?"),
+                a("서비스 정지 기한은 이번 주 금요일까지입니다. 다음 주 월요일 납부 가능하신지 확인 가능한가요?"),
+                c("월요일은 가능할 것 같아요. 그때까지 서비스는 유지되나요?"),
+                a("네, 납부 약속을 남겨드리겠습니다. 월요일까지 납부 미완료 시 다시 연락드리겠습니다. 좋은 하루 보내세요.")
+            ),
+            "REJECTED", "CONSIDER", "ETC_BILLING", "ADM_GUIDE",
+            "미납 고객 납부 기한 안내 아웃바운드",
+            "납부 기한 안내 후 고객 다음 주 납부 요청으로 결정 유보"
+        ));
+    }
+
+    /** ARREARS-NO_NEED-1: 해지 의사 표명 */
+    private static void buildArrearsRejectedNoNeed() {
+        ARREARS_TEMPLATES.add(new OutboundTemplate(
+            List.of(
+                a("안녕하세요, 고객님. LG U+ 고객센터입니다. 미납 요금 납부 관련하여 안내드리고자 연락드렸습니다."),
+                c("사실 서비스를 해지하려고 했어요. 납부는 해지 처리 후 정산으로 해도 되나요?"),
+                a("해지 시 미납 요금 및 위약금이 정산됩니다. 해지를 원하신다면 절차 안내해드리겠습니다."),
+                c("네, 그냥 해지하겠습니다."),
+                a("해지 처리 도와드리겠습니다. 정산 내역은 SMS로 발송해드리겠습니다. 그동안 이용해 주셔서 감사합니다.")
+            ),
+            "REJECTED", "NO_NEED", "ETC_BILLING", "ADM_CLOSE_FAIL",
+            "미납 고객 납부 안내 중 해지 의사 확인 아웃바운드",
+            "납부 안내 진행하였으나 고객 해지 의사 표명으로 해지 처리 완료"
+        ));
+    }
+
+    /** ARREARS-OTHER-1: 분쟁·청구 오류 주장으로 납부 거절 */
+    private static void buildArrearsRejectedOther() {
+        ARREARS_TEMPLATES.add(new OutboundTemplate(
+            List.of(
+                a("안녕하세요, 고객님. LG U+ 고객센터입니다. 미납 요금 납부 관련하여 안내드리고자 연락드렸습니다."),
+                c("그 금액은 제가 사용한 게 아닌데요? 청구 오류 아닌가요?"),
+                a("청구 내역 상세를 함께 확인해드리겠습니다. 오류가 확인되면 즉시 정정 처리해드리겠습니다."),
+                c("확인해봐도 제가 사용한 게 맞는지 모르겠어요. 확인 후 연락 주세요."),
+                a("네, 청구 내역 검토 후 24시간 내 연락드리겠습니다. 불편을 드려 죄송합니다. 좋은 하루 보내세요.")
+            ),
+            "REJECTED", "OTHER", "ETC_BILLING", "ADM_GUIDE",
+            "미납 고객 청구 오류 분쟁 납부 거절 아웃바운드",
+            "청구 내역 확인 후 재연락 약속, 청구 오류 주장 기타 사유로 납부 보류"
         ));
     }
 
@@ -1365,22 +1477,189 @@ public class OutboundRawTextGenerator {
      * outbound_category code_name을 기준으로 상담 원문과 결과서를 생성한다.
      *
      * <p>Factory는 먼저 code_name을 분포에 따라 선택한 뒤 이 메서드를 호출한다.
+     * {@link CustomerContext}를 전달하면 고객 이름 및 구독 상품명이 원문에 반영된다.
      *
-     * @param categoryType        상담 카테고리 유형 ("CHN" | "FEE" | "TRB")
+     * @param categoryType        상담 카테고리 유형 ("CHN" | "UPSELL" | "ARREARS" | "TRB")
      * @param outboundCategoryKey "CONVERTED" 또는 analysis_code outbound_category code_name
      *                            (COST | NO_NEED | SWITCH | CONSIDER | DISSATISFIED | OTHER)
      * @param random              난수 생성기
+     * @param ctx                 고객 컨텍스트 (이름, 모바일/홈 상품명)
      * @return 선택된 템플릿 기반 {@link OutboundTextResult}
      */
-    public OutboundTextResult generate(String categoryType, String outboundCategoryKey, Random random) {
+    public OutboundTextResult generate(String categoryType, String outboundCategoryKey,
+                                       Random random, CustomerContext ctx) {
         Map<String, List<OutboundTemplate>> map = switch (categoryType) {
-            case "FEE" -> FEE_TEMPLATE_MAP;
-            case "TRB" -> TRB_TEMPLATE_MAP;
-            default    -> TEMPLATE_MAP;
+            case "UPSELL"  -> UPSELL_TEMPLATE_MAP;
+            case "ARREARS" -> ARREARS_TEMPLATE_MAP;
+            case "TRB"     -> TRB_TEMPLATE_MAP;
+            default        -> TEMPLATE_MAP;
         };
         List<OutboundTemplate> pool = map.getOrDefault(outboundCategoryKey, TEMPLATES);
         OutboundTemplate t = pool.get(random.nextInt(pool.size()));
-        return toResult(t);
+        // REJECTED 상담에서 상담사가 실제 해지를 처리했는지 감지
+        boolean cancelProcessed = t.turns().stream()
+                .filter(turn -> "상담사".equals(turn.speaker()))
+                .anyMatch(turn -> turn.text().contains("해지 접수") || turn.text().contains("해지 처리"));
+        List<Turn> personalizedTurns = personalize(t.turns(), categoryType, ctx);
+        return new OutboundTextResult(
+                serialize(personalizedTurns),
+                t.callResult(),
+                t.outboundCategory(),
+                t.complaintCategory(),
+                t.defenseCategory(),
+                t.iamIssue(),
+                t.iamAction(),
+                cancelProcessed
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  개인화 로직
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 템플릿 대화를 고객 정보에 맞게 개인화한다.
+     *
+     * <p>두 단계로 처리된다:
+     * <ol>
+     *   <li>전체 발화: {@code "고객님"} → {@code "{name}님"} 치환</li>
+     *   <li>첫 번째 상담사 발화: 현재 구독 상품명을 핵심 문구에 삽입</li>
+     * </ol>
+     */
+    private List<Turn> personalize(List<Turn> turns, String categoryType, CustomerContext ctx) {
+        boolean firstAgent = true;
+        List<Turn> result = new ArrayList<>(turns.size());
+        for (Turn t : turns) {
+            // 1. 전체 발화에서 "고객님" → "{이름}님"
+            String text = t.text().replace("고객님", ctx.name() + "님");
+
+            if ("상담사".equals(t.speaker())) {
+                // 2. 첫 번째 상담사 발화에 현재 구독 상품명 삽입
+                if (firstAgent) {
+                    text = injectProduct(text, categoryType, ctx);
+                    firstAgent = false;
+                }
+                // 3. 모든 상담사 발화에 대상 요금제명 삽입 (CONVERTED 시)
+                if (ctx.targetMobilePlanName() != null) {
+                    text = injectTargetPlan(text, ctx.targetMobilePlanName());
+                }
+            }
+            result.add(new Turn(t.speaker(), text));
+        }
+        return result;
+    }
+
+    /**
+     * 상담사 발화에 변경 대상 요금제명을 삽입한다.
+     * CONVERTED 시 "한 단계 낮은 요금제" 등의 표현을 실제 상품명으로 교체한다.
+     */
+    private String injectTargetPlan(String text, String targetPlan) {
+        text = text.replace("한 단계 낮은 요금제로도 충분하실 것 같습니다",
+                targetPlan + "으로도 충분하실 것 같습니다");
+        text = text.replace("요금제도 한 단계 낮추시면",
+                targetPlan + "으로 변경하시면");
+        text = text.replace("한 단계 낮은 요금제로 변경 시",
+                targetPlan + "으로 변경 시");
+        text = text.replace("요금제를 조정하는 것만으로도",
+                targetPlan + "으로 변경하는 것만으로도");
+        return text;
+    }
+
+    /**
+     * 첫 번째 상담사 발화 텍스트에 현재 구독 상품명을 자연스럽게 삽입한다.
+     *
+     * <p>카테고리별 우선 상품:
+     * <ul>
+     *   <li>CHN — 발화에 "인터넷" 포함 시 홈 상품 우선, 그 외 모바일 우선</li>
+     *   <li>UPSELL — 발화에 "인터넷" 포함 시 홈 상품 우선, 그 외 모바일 우선</li>
+     *   <li>ARREARS — 모바일 상품 우선 (요금 미납이므로)</li>
+     *   <li>TRB — 홈 상품 우선 (인터넷/통화 품질 불만이므로)</li>
+     * </ul>
+     * 상품명이 없으면 원문을 그대로 반환한다.
+     */
+    private String injectProduct(String text, String categoryType, CustomerContext ctx) {
+        String mobile = ctx.mobilePlanName();
+        String home   = ctx.homePlanName();
+
+        // 카테고리 및 발화 내용을 기준으로 사용할 상품명 결정
+        final String p;
+        if ("TRB".equals(categoryType)) {
+            p = home != null ? home : mobile;
+        } else if ("UPSELL".equals(categoryType)) {
+            // 업셀링: 발화에 "인터넷" 포함 시 홈 상품, 그 외 모바일 상품
+            boolean hasHomeContext = text.contains("인터넷");
+            p = hasHomeContext ? (home != null ? home : mobile) : (mobile != null ? mobile : home);
+        } else if ("ARREARS".equals(categoryType)) {
+            p = mobile != null ? mobile : home; // 연체안내: 모바일 요금 우선
+        } else { // CHN
+            boolean hasHomeContext = text.contains("인터넷") || text.contains("이전 설치");
+            p = hasHomeContext ? (home != null ? home : mobile) : (mobile != null ? mobile : home);
+        }
+        if (p == null) return text;
+
+        // ── 약정 만료 / 재약정 관련 ────────────────────────────────────────
+        text = text.replace("약정 만료가 다가와",
+                "현재 이용 중이신 " + p + "의 약정 만료가 다가와");
+        text = text.replace("약정 만료를 앞두고",
+                "현재 이용 중이신 " + p + " 약정 만료를 앞두고");
+        text = text.replace("약정 만료 시점에",
+                "현재 이용 중이신 " + p + " 약정 만료 시점에");
+        text = text.replace("약정 만료 관련",
+                "현재 이용 중이신 " + p + " 약정 만료 관련");
+
+        // ── 해지 / 타사 이동 관련 ─────────────────────────────────────────
+        text = text.replace("타사 이동을 고려 중이시다는",
+                p + " 이용 중 타사 이동을 고려 중이시다는");
+        text = text.replace("타사 가입을 검토하셨다는",
+                p + " 이용 중 타사 가입을 검토하셨다는");
+        text = text.replace("타사와의 요금 비교를 고려 중이시라는",
+                p + " 이용 중 타사와의 요금 비교를 고려 중이시라는");
+        text = text.replace("해지 문의 관련하여",
+                p + " 해지 문의 관련하여");
+        text = text.replace("해지 문의가 있으셨다는",
+                p + " 해지 문의가 있으셨다는");
+        text = text.replace("해지 문의 이력이",
+                p + " 해지 문의 이력이");
+        text = text.replace("중도 해지 문의가",
+                p + " 중도 해지 문의가");
+
+        // ── 요금 / 사용량 관련 ────────────────────────────────────────────
+        text = text.replace("요금 부담 관련하여",
+                p + " 요금 부담 관련하여");
+        text = text.replace("요금 청구 내역을 분석하여",
+                p + " 요금 청구 내역을 분석하여");
+        text = text.replace("데이터 사용량을 분석한 결과,",
+                p + " 데이터 사용량을 분석한 결과,");
+        text = text.replace("요금 관련 불편을 겪고 계신다는",
+                p + " 요금 관련 불편을 겪고 계신다는");
+        text = text.replace("요금 관련 도움드리고자",
+                p + " 요금 관련 도움드리고자");
+        text = text.replace("요금 관련 안내드리고자",
+                p + " 요금 관련 안내드리고자");
+
+        // ── 품질 / 기술 불만 관련 (TRB / CHN 일부) ───────────────────────
+        text = text.replace("인터넷 품질 불편을 겪고 계신다는",
+                p + " 품질 불편을 겪고 계신다는");
+        text = text.replace("인터넷 품질 관련 불편을 겪고 계신다는",
+                p + " 품질 관련 불편을 겪고 계신다는");
+        text = text.replace("인터넷 품질 관련 불편이 있으셨다는",
+                p + " 품질 관련 불편이 있으셨다는");
+        text = text.replace("인터넷 속도 관련 불만이 있으셨다는",
+                p + " 속도 관련 불만이 있으셨다는");
+        text = text.replace("인터넷 속도 불만이 지속되고 계신다는",
+                p + " 속도 불만이 지속되고 계신다는");
+        text = text.replace("반복적인 인터넷 장애로",
+                "반복적인 " + p + " 장애로");
+        text = text.replace("인터넷 품질 불편으로 해지를 고려 중이시다는",
+                p + " 품질 불편으로 해지를 고려 중이시다는");
+        text = text.replace("인터넷 품질 불편으로 해지를 고려 중이시라는",
+                p + " 품질 불편으로 해지를 고려 중이시라는");
+        text = text.replace("통화 품질 불편을 겪고 계신다는",
+                p + " 품질 불편을 겪고 계신다는");
+        text = text.replace("서비스 불편 관련하여 도움드리고자",
+                p + " 서비스 불편 관련하여 도움드리고자");
+
+        return text;
     }
 
     /**
@@ -1389,18 +1668,6 @@ public class OutboundRawTextGenerator {
      */
     public Map<String, List<OutboundTemplate>> getTemplateMap() {
         return Collections.unmodifiableMap(TEMPLATE_MAP);
-    }
-
-    private OutboundTextResult toResult(OutboundTemplate t) {
-        return new OutboundTextResult(
-                serialize(t.turns()),
-                t.callResult(),
-                t.outboundCategory(),
-                t.complaintCategory(),
-                t.defenseCategory(),
-                t.iamIssue(),
-                t.iamAction()
-        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────

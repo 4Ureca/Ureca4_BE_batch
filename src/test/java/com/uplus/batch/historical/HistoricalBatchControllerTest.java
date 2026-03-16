@@ -33,7 +33,7 @@ class HistoricalBatchControllerTest {
         given(properties.isEnabled()).willReturn(false);
 
         // When
-        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null);
+        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null, false);
 
         // Then
         assertThat(response.getStatusCode().value()).isEqualTo(403);
@@ -50,7 +50,7 @@ class HistoricalBatchControllerTest {
         given(batchService.isRunning()).willReturn(true);
 
         // When
-        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null);
+        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null, false);
 
         // Then
         assertThat(response.getStatusCode().value()).isEqualTo(409);
@@ -69,7 +69,7 @@ class HistoricalBatchControllerTest {
         given(properties.getChunkSize()).willReturn(100);
 
         // When
-        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null);
+        ResponseEntity<Map<String, Object>> response = controller.runBatch(null, null, false);
 
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);

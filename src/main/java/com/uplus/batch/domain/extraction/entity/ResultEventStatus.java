@@ -25,9 +25,6 @@ public class ResultEventStatus {
     @Column(name = "category_code", length = 20, nullable = false)
     private String categoryCode;
 
-    @Column(name = "consultation_type", length = 20, nullable = false)
-    private String consultationType = "INBOUND";
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
     private EventStatus status;
@@ -49,10 +46,9 @@ public class ResultEventStatus {
     private LocalDateTime updatedAt;
 
     @Builder
-    public ResultEventStatus(Long consultId, String categoryCode, String consultationType) {
+    public ResultEventStatus(Long consultId, String categoryCode) {
         this.consultId = consultId;
         this.categoryCode = categoryCode;
-        this.consultationType = consultationType != null ? consultationType : "INBOUND";
         this.status = EventStatus.REQUESTED;
         this.retryCount = 0;
     }
