@@ -39,7 +39,7 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>§2 분포 조건:
  * <ul>
- *   <li>결과: CONVERTED 45% / REJECTED 55% (outbound_category 분포로 제어)</li>
+ *   <li>결과: CHN CONVERTED 10% / FEE CONVERTED 50% / TRB CONVERTED 35% (outbound_category 분포로 제어)</li>
  *   <li>고객 만족도 평가: 40% (아웃바운드 특성상 인바운드 70%보다 낮음)</li>
  *   <li>위험 감지 로그: 항상 생성 (아웃바운드 대상 = 이탈 위험 고객)</li>
  * </ul>
@@ -409,15 +409,11 @@ public class OutboundConsultationFactory {
     /**
      * outbound_category code_name을 분포에 따라 선택한다.
      *
-     * <p>분포 설계:
+     * <p>분포 설계 (카테고리 유형별):
      * <ul>
-     *   <li>CONVERTED (전환 성공): 45%</li>
-     *   <li>COST (요금/비용 문제): 16% — 가장 흔한 거절 사유</li>
-     *   <li>SWITCH (타사 전환): 11%</li>
-     *   <li>DISSATISFIED (서비스 불만): 10%</li>
-     *   <li>NO_NEED (필요 없음): 8%</li>
-     *   <li>CONSIDER (고려 중): 6%</li>
-     *   <li>OTHER (기타): 4%</li>
+     *   <li>CHN (50%): CONVERTED 10% / COST 26% / SWITCH 16% / DISSATISFIED 16% / NO_NEED 13% / CONSIDER 10% / OTHER 9%</li>
+     *   <li>FEE (25%): CONVERTED 50% / COST 29% / CONSIDER 10% / SWITCH 7% / OTHER 4%</li>
+     *   <li>TRB (25%): CONVERTED 35% / DISSATISFIED 35% / CONSIDER 14% / SWITCH 10% / OTHER 6%</li>
      * </ul>
      *
      * @param categoryType "CHN" | "FEE" | "TRB"
@@ -432,39 +428,39 @@ public class OutboundConsultationFactory {
         };
     }
 
-    /** CHN: CONVERTED 45% / COST 16% / SWITCH 11% / DISSATISFIED 10% / NO_NEED 8% / CONSIDER 6% / OTHER 4% */
+    /** CHN: CONVERTED 10% / COST 26% / SWITCH 16% / DISSATISFIED 16% / NO_NEED 13% / CONSIDER 10% / OTHER 9% */
     private String pickChnOutboundCategoryKey(int roll) {
-        if (roll < 45) return "CONVERTED";
-        if (roll < 61) return "COST";
-        if (roll < 72) return "SWITCH";
-        if (roll < 82) return "DISSATISFIED";
-        if (roll < 90) return "NO_NEED";
-        if (roll < 96) return "CONSIDER";
+        if (roll < 10) return "CONVERTED";
+        if (roll < 36) return "COST";
+        if (roll < 52) return "SWITCH";
+        if (roll < 68) return "DISSATISFIED";
+        if (roll < 81) return "NO_NEED";
+        if (roll < 91) return "CONSIDER";
         return "OTHER";
     }
 
-    /** FEE: CONVERTED 40% / COST 35% / CONSIDER 12% / SWITCH 8% / OTHER 5% */
+    /** FEE: CONVERTED 50% / COST 29% / CONSIDER 10% / SWITCH 7% / OTHER 4% */
     private String pickFeeOutboundCategoryKey(int roll) {
-        if (roll < 40) return "CONVERTED";
-        if (roll < 75) return "COST";
-        if (roll < 87) return "CONSIDER";
-        if (roll < 95) return "SWITCH";
+        if (roll < 50) return "CONVERTED";
+        if (roll < 79) return "COST";
+        if (roll < 89) return "CONSIDER";
+        if (roll < 96) return "SWITCH";
         return "OTHER";
     }
 
-    /** TRB: CONVERTED 45% / DISSATISFIED 30% / CONSIDER 12% / SWITCH 8% / OTHER 5% */
+    /** TRB: CONVERTED 35% / DISSATISFIED 35% / CONSIDER 14% / SWITCH 10% / OTHER 6% */
     private String pickTrbOutboundCategoryKey(int roll) {
-        if (roll < 45) return "CONVERTED";
-        if (roll < 75) return "DISSATISFIED";
-        if (roll < 87) return "CONSIDER";
-        if (roll < 95) return "SWITCH";
+        if (roll < 35) return "CONVERTED";
+        if (roll < 70) return "DISSATISFIED";
+        if (roll < 84) return "CONSIDER";
+        if (roll < 94) return "SWITCH";
         return "OTHER";
     }
 
-    /** 카테고리 유형 선택: CHN 60% / FEE 25% / TRB 15% */
+    /** 카테고리 유형 선택: CHN 50% / FEE 25% / TRB 25% */
     private String pickCategoryType(int roll) {
-        if (roll < 60) return "CHN";
-        if (roll < 85) return "FEE";
+        if (roll < 50) return "CHN";
+        if (roll < 75) return "FEE";
         return "TRB";
     }
 
