@@ -31,10 +31,11 @@ public class SyntheticPersonMatcher {
     @Getter private List<CustomerInfo> customers   = new ArrayList<>();
 
     /** 카테고리 코드 — 유형별 분류 (§2-1 분포 조건) */
-    @Getter private List<String> chnCodes;   // 해지/재약정 40%
-    @Getter private List<String> trbCodes;   // 장애/AS    20%
-    @Getter private List<String> feeCodes;   // 요금/납부  20%
-    @Getter private List<String> otherCodes; // 기타       20%
+    @Getter private List<String> chnCodes;   // 해지/재약정 40% (인바운드 전용)
+    @Getter private List<String> trbCodes;   // 장애/AS    20% (인바운드 전용)
+    @Getter private List<String> feeCodes;   // 요금/납부  20% (인바운드 전용)
+    @Getter private List<String> otherCodes; // 기타       20% (인바운드 전용, OTB 제외)
+    @Getter private List<String> otbCodes;   // 아웃바운드 전용 (M_OTB_*)
 
     // ─────────────────────────────────────────────────────────
     //  DTO
@@ -65,9 +66,9 @@ public class SyntheticPersonMatcher {
         loadAgents();
         loadCustomers();
         loadCategoryCodesByType();
-        log.info("[SyntheticPersonMatcher] 초기화 완료 — 상담사: {}명, 고객: {}명, CHN: {}, TRB: {}, FEE: {}, 기타: {}",
+        log.info("[SyntheticPersonMatcher] 초기화 완료 — 상담사: {}명, 고객: {}명, CHN: {}, TRB: {}, FEE: {}, 기타: {}, OTB: {}",
                 agents.size(), customers.size(),
-                chnCodes.size(), trbCodes.size(), feeCodes.size(), otherCodes.size());
+                chnCodes.size(), trbCodes.size(), feeCodes.size(), otherCodes.size(), otbCodes.size());
     }
 
     private void loadAgents() {
@@ -136,14 +137,16 @@ public class SyntheticPersonMatcher {
                 String.class
         );
 
+        otbCodes   = all.stream().filter(c -> c.startsWith("M_OTB")).collect(Collectors.toList());
         chnCodes   = all.stream().filter(c -> c.contains("CHN")).collect(Collectors.toList());
         trbCodes   = all.stream().filter(c -> c.contains("TRB")).collect(Collectors.toList());
         feeCodes   = all.stream().filter(c -> c.contains("FEE")).collect(Collectors.toList());
         otherCodes = all.stream()
-                .filter(c -> !c.contains("CHN") && !c.contains("TRB") && !c.contains("FEE"))
+                .filter(c -> !c.startsWith("M_OTB") && !c.contains("CHN") && !c.contains("TRB") && !c.contains("FEE"))
                 .collect(Collectors.toList());
 
         // 폴백: 코드가 없는 유형은 전체에서 샘플링
+        if (otbCodes.isEmpty())   otbCodes   = all.stream().filter(c -> c.startsWith("M_OTB")).collect(Collectors.toList());
         if (chnCodes.isEmpty())   chnCodes   = all;
         if (trbCodes.isEmpty())   trbCodes   = all;
         if (feeCodes.isEmpty())   feeCodes   = all;

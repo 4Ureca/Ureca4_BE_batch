@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *             result_event_status  → REQUESTED
  *             summary_event_status → requested
  *   아웃바운드: consultation_results + raw_texts + 연관 테이블 생성 (created_at = targetDate)
- *              result_event_status  → REQUESTED (consultation_type=OUTBOUND)
+ *              result_event_status  → REQUESTED (category_code M_OTB_* → 아웃바운드 판별)
  *              summary_event_status → requested
  *
  * [ExtractionScheduler — 별도 배치]

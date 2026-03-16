@@ -311,8 +311,8 @@ public class SyntheticConsultationFactory {
         jdbcTemplate.batchUpdate(
                 """
                 INSERT INTO result_event_status
-                    (consult_id, category_code, consultation_type, status, retry_count, created_at, updated_at)
-                VALUES (?, ?, 'INBOUND', 'REQUESTED', 0, NOW(), NOW())
+                    (consult_id, category_code, status, retry_count, created_at, updated_at)
+                VALUES (?, ?, 'REQUESTED', 0, NOW(), NOW())
                 """,
                 args
         );

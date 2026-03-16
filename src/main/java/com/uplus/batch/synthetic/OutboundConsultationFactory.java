@@ -83,20 +83,18 @@ public class OutboundConsultationFactory {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         var agents    = personMatcher.getAgents();
         var customers = personMatcher.getCustomers();
-        var chnCodes  = personMatcher.getChnCodes();
-        var feeCodes  = personMatcher.getFeeCodes();
-        var trbCodes  = personMatcher.getTrbCodes();
+        var otbCodes  = personMatcher.getOtbCodes();
 
-        if (agents.isEmpty() || customers.isEmpty() || chnCodes.isEmpty()) {
-            log.warn("[OutboundFactory] 상담사·고객·CHN 카테고리 없음 — Step1 스킵");
+        if (agents.isEmpty() || customers.isEmpty() || otbCodes.isEmpty()) {
+            log.warn("[OutboundFactory] 상담사·고객·OTB 카테고리 없음 — Step1 스킵");
             return new BatchResult(List.of(), List.of());
         }
 
         String resultSql = """
                 INSERT INTO consultation_results
                     (emp_id, customer_id, channel, category_code, duration_sec,
-                     iam_issue, iam_action, iam_memo, consultation_type, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OUTBOUND', ?)
+                     iam_issue, iam_action, iam_memo, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         List<Long>    consultIds          = new ArrayList<>(batchSize);
@@ -114,13 +112,8 @@ public class OutboundConsultationFactory {
         for (int i = 0; i < batchSize; i++) {
             var agent    = agents.get(random.nextInt(agents.size()));
             var customer = customers.get(random.nextInt(customers.size()));
-            String categoryType = pickCategoryType(random.nextInt(100)); // CHN 60% / FEE 25% / TRB 15%
-            List<String> codePool = switch (categoryType) {
-                case "FEE" -> feeCodes.isEmpty() ? chnCodes : feeCodes;
-                case "TRB" -> trbCodes.isEmpty() ? chnCodes : trbCodes;
-                default    -> chnCodes;
-            };
-            String categoryCode = codePool.get(random.nextInt(codePool.size()));
+            String categoryType = pickCategoryType(random.nextInt(100)); // 원문 생성 방향: CHN 60% / FEE 25% / TRB 15%
+            String categoryCode = otbCodes.get(random.nextInt(otbCodes.size())); // 항상 M_OTB_*
             int durationSec = 120 + random.nextInt(481); // CALL: 120~600s
 
             String outboundCategoryKey = pickOutboundCategoryKey(categoryType, random.nextInt(100));
@@ -217,8 +210,8 @@ public class OutboundConsultationFactory {
         jdbcTemplate.batchUpdate(
                 """
                 INSERT INTO result_event_status
-                    (consult_id, category_code, consultation_type, status, retry_count, created_at, updated_at)
-                VALUES (?, ?, 'OUTBOUND', 'REQUESTED', 0, NOW(), NOW())
+                    (consult_id, category_code, status, retry_count, created_at, updated_at)
+                VALUES (?, ?, 'REQUESTED', 0, NOW(), NOW())
                 """,
                 args
         );

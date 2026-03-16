@@ -172,7 +172,7 @@ public class BundledGeminiExtractor {
             OTHER       (기타 사유로 거절)""";
 
     private String buildPrompt(List<BundleItem> items) {
-        boolean isOutbound = items.stream().anyMatch(it -> "OUTBOUND".equals(it.consultationType()));
+        boolean isOutbound = items.stream().anyMatch(BundleItem::isOutbound);
         return isOutbound ? buildOutboundPrompt(items) : buildInboundPrompt(items);
     }
 
@@ -333,7 +333,7 @@ public class BundledGeminiExtractor {
 
             String reason = node.path("complaint_reason").isNull()
                     ? null : node.path("complaint_reason").asText(null);
-            boolean isInbound = "INBOUND".equals(item.consultationType());
+            boolean isInbound = !item.isOutbound();
             String complaintCat = toValidCode(node.path("complaint_category"), VALID_COMPLAINT_CATEGORIES, isInbound);
             String defenseCat   = toValidCode(node.path("defense_category"),   VALID_DEFENSE_CATEGORIES,   isInbound);
             String outboundCallResult = node.path("outbound_call_result").isNull()
@@ -428,5 +428,7 @@ public class BundledGeminiExtractor {
 
     // ─── 입력 DTO ─────────────────────────────────────────────────────────────
 
-    public record BundleItem(long consultId, String categoryCode, String rawTextJson, String consultationType) {}
+    public record BundleItem(long consultId, String categoryCode, String rawTextJson) {
+        public boolean isOutbound() { return categoryCode != null && categoryCode.startsWith("M_OTB"); }
+    }
 }
