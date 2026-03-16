@@ -46,12 +46,14 @@ public class ConsultationSummaryGenerator {
 
         List<Long> consultIds = new ArrayList<>(rawRows.size());
         List<Object[]> resultEventArgs = new ArrayList<>(rawRows.size());
-
+        List<Object[]> excellentEventArgs = new ArrayList<>(rawRows.size());
+        
         for (Object[] row : rawRows) {
             Long consultId = (Long) row[0];
             String categoryCode = (String) row[1];
             consultIds.add(consultId);
             resultEventArgs.add(new Object[]{consultId, categoryCode});
+            excellentEventArgs.add(new Object[]{consultId});
         }
 
         // 1. result_event_status INSERT (REQUESTED)
@@ -61,8 +63,16 @@ public class ConsultationSummaryGenerator {
                 "VALUES (?, ?, 'REQUESTED', 0, NOW(), NOW())",
                 resultEventArgs
         );
+        
+        // 2. excellent_event_status INSERT (REQUESTED)
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO excellent_event_status " +
+                "(consult_id, status, retry_count, created_at, updated_at) " +
+                "VALUES (?, 'REQUESTED', 0, NOW(), NOW())",
+                excellentEventArgs
+        );
 
-        // 2. summary_event_status INSERT (requested)
+        // 3. summary_event_status INSERT (requested)
         List<SummaryEventStatus> summaryEvents = new ArrayList<>(consultIds.size());
         for (Long consultId : consultIds) {
             summaryEvents.add(SummaryEventStatus.builder().consultId(consultId).build());
@@ -72,5 +82,7 @@ public class ConsultationSummaryGenerator {
         log.info("[SummaryGenerator] {}건 이벤트 발행 완료 (requested) | range: {} ~ {}",
                 rawRows.size(), startId, endId);
         return rawRows.size();
+        
+        
     }
 }

@@ -187,6 +187,7 @@ public class HistoricalBatchService {
             }
 
             outboundConsultationFactory.triggerAiExtraction(result.consultIds(), result.categoryCodes());
+            consultationFactory.triggerExcellentScoring(result.consultIds());
             outboundConsultationFactory.triggerSummaryGeneration(result.consultIds());
             done += result.consultIds().size();
             log.debug("[HistoricalBatch] {} 아웃바운드 {}/{}건 등록", targetDate, done, total);

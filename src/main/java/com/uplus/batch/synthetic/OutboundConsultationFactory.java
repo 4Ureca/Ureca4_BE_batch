@@ -208,7 +208,7 @@ public class OutboundConsultationFactory {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Step 2: result_event_status REQUESTED (OUTBOUND, Step1 커밋 후)
+    //  Step 2: result_event_status, excellent_event_status REQUESTED (OUTBOUND, Step1 커밋 후)
     // ─────────────────────────────────────────────────────────────────────────
 
     public void triggerAiExtraction(List<Long> consultIds, List<String> categoryCodes) {
@@ -225,7 +225,22 @@ public class OutboundConsultationFactory {
                 args
         );
     }
-
+    public void triggerExcellentScoring(List<Long> consultIds) {
+        List<Object[]> args = new ArrayList<>(consultIds.size());
+        for (Long consultId : consultIds) {
+            args.add(new Object[]{consultId});
+        }
+        
+        jdbcTemplate.batchUpdate(
+                """
+                INSERT INTO excellent_event_status
+                    (consult_id, status, retry_count, created_at, updated_at)
+                VALUES (?, 'REQUESTED', 0, NOW(), NOW())
+                """,
+                args
+        );
+        log.info("[OutboundFactory] {}건 채점 이벤트(excellent) 발행 완료", consultIds.size());
+    }
     // ─────────────────────────────────────────────────────────────────────────
     //  Step 3: summary_event_status REQUESTED (Step1 커밋 후)
     // ─────────────────────────────────────────────────────────────────────────

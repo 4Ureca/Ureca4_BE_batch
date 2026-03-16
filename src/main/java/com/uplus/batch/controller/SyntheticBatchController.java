@@ -212,6 +212,7 @@ public class SyntheticBatchController {
                 inboundCategoryCodes = inbound.categoryCodes();
 
                 factory.triggerAiExtraction(inbound.consultIds(), inbound.categoryCodes());
+                factory.triggerExcellentScoring(inbound.consultIds());
                 factory.triggerSummaryGeneration(inbound.consultIds());
             }
 
@@ -220,6 +221,7 @@ public class SyntheticBatchController {
                 OutboundConsultationFactory.BatchResult outbound = outboundFactory.executeStep1(outboundCount);
                 allConsultIds.addAll(outbound.consultIds());
                 outboundFactory.triggerAiExtraction(outbound.consultIds(), outbound.categoryCodes());
+                outboundFactory.triggerExcellentScoring(outbound.consultIds());
                 outboundFactory.triggerSummaryGeneration(outbound.consultIds());
             }
 
