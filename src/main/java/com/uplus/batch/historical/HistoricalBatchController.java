@@ -1,7 +1,11 @@
 package com.uplus.batch.historical;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
+import co.elastic.clients.elasticsearch.core.DeleteByQueryResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,6 +30,8 @@ public class HistoricalBatchController {
     private final HistoricalBatchService batchService;
     private final HistoricalBatchProperties properties;
     private final HistoricalBatchRepository checkpointRepo;
+    private final MongoTemplate mongoTemplate;
+    private final ElasticsearchClient elasticsearchClient;
 
     /**
      * 배치를 백그라운드 스레드로 실행한다.
@@ -125,5 +131,47 @@ public class HistoricalBatchController {
         return ResponseEntity.ok(Map.of(
                 "running", batchService.isRunning()
         ));
+    }
+
+    /**
+     * 상담 데이터 전체 초기화 — MySQL 상담 관련 테이블 TRUNCATE + MongoDB consultation_summary 삭제 + ES 도큐먼트 삭제.
+     * consultation_results auto_increment가 1로 리셋된다.
+     * historical_batch_log도 초기화되므로 이후 /run 호출 시 전 기간 재생성된다.
+     */
+    @PostMapping("/reset")
+    public ResponseEntity<Map<String, Object>> resetAll() {
+        if (batchService.isRunning()) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "status", "error",
+                    "message", "배치가 실행 중입니다. 완료 후 reset을 호출하세요."
+            ));
+        }
+        try {
+            checkpointRepo.truncateAllConsultationData();
+            log.info("[HistoricalBatch] MySQL 상담 테이블 TRUNCATE 완료");
+
+            mongoTemplate.dropCollection("consultation_summary");
+            log.info("[HistoricalBatch] MongoDB consultation_summary 삭제 완료");
+
+            for (String index : new String[]{"consult-search-index", "consult-keyword-index"}) {
+                boolean exists = elasticsearchClient.indices().exists(r -> r.index(index)).value();
+                if (exists) {
+                    DeleteByQueryResponse res = elasticsearchClient.deleteByQuery(
+                            DeleteByQueryRequest.of(r -> r.index(index).query(q -> q.matchAll(m -> m))));
+                    log.info("[HistoricalBatch] ES {} 도큐먼트 {}건 삭제 완료", index, res.deleted());
+                }
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "status", "ok",
+                    "message", "상담 데이터 초기화 완료. consultation_results auto_increment = 1. /api/historical/run으로 재생성하세요."
+            ));
+        } catch (Exception e) {
+            log.error("[HistoricalBatch] reset 실패", e);
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "status", "error",
+                    "message", e.getMessage()
+            ));
+        }
     }
 }
