@@ -78,11 +78,14 @@ public class DailyAgentReportProcessor implements ItemProcessor<Long, DailyAgent
         ? LocalDate.parse(targetDateParam)
         : LocalDate.now().minusDays(1);
 
-    // 1. 카테고리별 집계
-    List<CategoryRanking> rankings = aggregateCategoryRanking(agentId, targetDate);
-
-    // 2. 전체 성과 지표 집계 (평균 소요 시간, 만족도 포함)
+    // 1. 전체 성과 지표 집계 (평균 소요 시간, 만족도 포함)
     DailyMetrics metrics = aggregateDailyMetrics(agentId, targetDate);
+    if (metrics.getCount() == 0) {
+      return null;
+    }
+
+    // 2. 카테고리별 집계
+    List<CategoryRanking> rankings = aggregateCategoryRanking(agentId, targetDate);
 
     // 3. 응대 품질 분석 (ES consult-keyword-index aggregation)
     QualityAnalysis qualityAnalysis = analyzeQuality(agentId, targetDate);
