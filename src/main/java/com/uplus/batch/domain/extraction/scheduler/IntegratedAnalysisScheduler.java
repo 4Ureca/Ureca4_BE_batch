@@ -30,7 +30,7 @@ public class IntegratedAnalysisScheduler {
     // 중복 실행 방지를 위한 원자적 플래그
     private final AtomicBoolean isProcessing = new AtomicBoolean(false);
 
-    @Scheduled(fixedDelay = 60000)
+    @Scheduled(fixedDelay = 20000)
     public void executeIntegratedAnalysis() {
         // [STEP 1] 문지기 체크: 원자적으로 false일 때만 true로 바꾸고 통과 
         if (!isProcessing.compareAndSet(false, true)) {
@@ -43,7 +43,7 @@ public class IntegratedAnalysisScheduler {
         try {
             // [STEP 2] 데이터 조회 
             List<ResultEventStatus> pendingResults = 
-                resultEventRepository.findReadyToProcessPairs(PageRequest.of(0, 50));
+                resultEventRepository.findReadyToProcessPairs(PageRequest.of(0, 20));
 
             if (pendingResults.isEmpty()) {
                 log.info("[Batch] 처리할 데이터가 없습니다.");

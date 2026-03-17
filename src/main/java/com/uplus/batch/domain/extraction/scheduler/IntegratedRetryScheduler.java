@@ -27,7 +27,7 @@ public class IntegratedRetryScheduler {
     /**
      * 통합 복구 엔진: 실패 데이터 재시도 및 멈춰있는(좀비) 데이터 구출
      */
-    @Scheduled(fixedDelay = 3600000) // 1시간마다 실행
+    @Scheduled(fixedDelay = 600000) // 10분마다
     @Transactional
     public void retryAndRecoverTasks() {
         log.info("[Recovery] 통합 복구 엔진 가동...");
