@@ -2,6 +2,7 @@ package com.uplus.batch.controller;
 
 import com.uplus.batch.synthetic.OutboundConsultationFactory;
 import com.uplus.batch.synthetic.SyntheticConsultationFactory;
+import com.uplus.batch.synthetic.SyntheticPersonMatcher;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -76,6 +77,15 @@ public class SyntheticBatchController {
 
     private final SyntheticConsultationFactory factory;
     private final OutboundConsultationFactory outboundFactory;
+    private final SyntheticPersonMatcher personMatcher;
+
+    @Operation(summary = "상담사·고객 캐시 갱신", description = "SyntheticPersonMatcher의 상담사·고객 목록을 DB에서 다시 로드합니다. 서버 재시작 없이 employees 테이블 변경 사항을 반영할 때 사용합니다.")
+    @PostMapping("/refresh-persons")
+    public ResponseEntity<String> refreshPersons() {
+        personMatcher.init();
+        return ResponseEntity.ok("상담사 " + personMatcher.getAgents().size() + "명, 고객 "
+                + personMatcher.getCustomers().size() + "명 재로드 완료");
+    }
 
     @Operation(
         summary = "합성 상담 데이터 생성 (인바운드·아웃바운드 비율 지정)",
