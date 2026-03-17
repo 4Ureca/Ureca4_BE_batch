@@ -106,6 +106,29 @@ public class HistoricalBatchRepository {
         );
     }
 
+    /**
+     * 상담 관련 테이블 전체 TRUNCATE + historical_batch_log 초기화.
+     * consultation_results auto_increment가 1로 리셋된다.
+     */
+    public void truncateAllConsultationData() {
+        jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 0");
+        for (String table : new String[]{
+                "retention_analysis",
+                "result_event_status",
+                "summary_event_status",
+                "excellent_event_status",
+                "client_review",
+                "customer_risk_logs",
+                "consult_product_logs",
+                "consultation_raw_texts",
+                "consultation_results",
+                "historical_batch_log"
+        }) {
+            jdbcTemplate.execute("TRUNCATE TABLE " + table);
+        }
+        jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS = 1");
+    }
+
     /** 전체 진행 현황 조회 (컨트롤러 status 엔드포인트용) */
     public List<java.util.Map<String, Object>> findAllStatus() {
         return jdbcTemplate.queryForList(
