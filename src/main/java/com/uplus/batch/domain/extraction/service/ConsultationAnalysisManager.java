@@ -148,8 +148,18 @@ public class ConsultationAnalysisManager {
     }
 
     private void saveExtraction(Long id, AiExtractionResponse res) throws Exception {
+        String callResult = res.outbound_call_result();
+        if (callResult != null) {
+            String upper = callResult.trim().toUpperCase();
+            callResult = (upper.equals("CONVERTED") || upper.equals("REJECTED")) ? upper : null;
+        }
+        AiExtractionResponse normalized = new AiExtractionResponse(
+                res.raw_summary(), res.has_intent(), res.complaint_reason(), res.complaint_category(),
+                res.defense_attempted(), res.defense_success(), res.defense_actions(), res.defense_category(),
+                callResult, res.outbound_report(), res.outbound_category()
+        );
         extractionRepository.save(ConsultationExtraction.builder()
-                .consultId(id).res(res).actionsJson(objectMapper.writeValueAsString(res.defense_actions())).build());
+                .consultId(id).res(normalized).actionsJson(objectMapper.writeValueAsString(normalized.defense_actions())).build());
     }
 
     private void saveEvaluation(Long id, QualityScoringResponse res) {

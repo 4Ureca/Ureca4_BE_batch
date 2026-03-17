@@ -40,7 +40,7 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>§2 분포 조건:
  * <ul>
  *   <li>결과: CHN CONVERTED 10% / UPSELL CONVERTED 60% / ARREARS CONVERTED 75% / TRB CONVERTED 35%</li>
- *   <li>고객 만족도 평가: 40% (아웃바운드 특성상 인바운드 70%보다 낮음)</li>
+ *   <li>고객 만족도 평가: 100% (모든 상담에 대해 항상 생성)</li>
  *   <li>위험 감지 로그: 항상 생성 (아웃바운드 대상 = 이탈 위험 고객)</li>
  * </ul>
  */
@@ -106,7 +106,8 @@ public class OutboundConsultationFactory {
         List<Integer> empIds              = new ArrayList<>(batchSize);
         List<Long>    customerIds         = new ArrayList<>(batchSize);
         List<String>  categoryTypes       = new ArrayList<>(batchSize);
-        List<String>  callResults         = new ArrayList<>(batchSize);
+        List<String>  callResults          = new ArrayList<>(batchSize);
+        List<String>  outboundCategories  = new ArrayList<>(batchSize);
         List<Boolean> cancelProcesseds    = new ArrayList<>(batchSize);
         List<String>  targetMobileCodes   = new ArrayList<>(batchSize);
         List<String>  customerMobileCodes = new ArrayList<>(batchSize);
@@ -186,6 +187,7 @@ public class OutboundConsultationFactory {
             customerIds.add(custId);
             categoryTypes.add(categoryType);
             callResults.add(textResult.callResult());
+            outboundCategories.add(textResult.outboundCategory());
             cancelProcesseds.add(textResult.cancelProcessed());
             targetMobileCodes.add(targetMobileCode);
             customerMobileCodes.add(customer.mobileCode());
@@ -199,7 +201,7 @@ public class OutboundConsultationFactory {
         );
 
         // ── 연관 테이블 Bulk INSERT ──────────────────────────────────────────
-        insertClientReviews(consultIds, random);
+        insertClientReviews(consultIds, callResults, outboundCategories, random);
         insertCustomerRiskLogs(consultIds, empIds, customerIds, random);
         insertProductLogs(consultIds, customerIds, categoryTypes, callResults,
                 cancelProcesseds, targetMobileCodes, customerMobileCodes, random);
@@ -262,20 +264,31 @@ public class OutboundConsultationFactory {
 
     /**
      * client_review — 고객 만족도 평가.
-     * 아웃바운드는 상담사가 먼저 전화한 상황이므로 응답률을 40%로 낮게 설정한다.
+     *
+     * <p>아웃바운드 통화 결과(= 상담 원문의 결말)로 기반 만족도를 산출하고,
+     * 기반 만족도가 높을수록 응답률을 낮게 설정한다 (불만족 고객이 더 적극적으로 응답).
+     *
+     * <ul>
+     *   <li>CONVERTED → base 4 (성공적 결과, 고객 긍정)</li>
+     *   <li>REJECTED + DISSATISFIED → base 1 (서비스 불만)</li>
+     *   <li>REJECTED + COST / SWITCH / OTHER → base 2 (부정적 거절)</li>
+     *   <li>REJECTED + NO_NEED / CONSIDER → base 3 (중립적 거절)</li>
+     * </ul>
      */
-    private void insertClientReviews(List<Long> consultIds, ThreadLocalRandom random) {
+    private void insertClientReviews(List<Long> consultIds, List<String> callResults,
+                                     List<String> outboundCategories, ThreadLocalRandom random) {
         List<Object[]> args = new ArrayList<>();
-        for (Long consultId : consultIds) {
-            if (random.nextInt(100) >= 40) continue; // 60% 미응답
+        for (int i = 0; i < consultIds.size(); i++) {
+            int base = baseSatisfactionFromOutbound(callResults.get(i), outboundCategories.get(i));
+            if (random.nextInt(100) >= satisfactionResponseRate(base)) continue;
 
-            int s1 = 1 + random.nextInt(5);
-            int s2 = 1 + random.nextInt(5);
-            int s3 = 1 + random.nextInt(5);
-            int s4 = 1 + random.nextInt(5);
-            int s5 = 1 + random.nextInt(5);
+            int s1 = satisfactionScore(base, random);
+            int s2 = satisfactionScore(base, random);
+            int s3 = satisfactionScore(base, random);
+            int s4 = satisfactionScore(base, random);
+            int s5 = satisfactionScore(base, random);
             double avg = Math.round((s1 + s2 + s3 + s4 + s5) / 5.0 * 10) / 10.0;
-            args.add(new Object[]{consultId, s1, s2, s3, s4, s5, avg});
+            args.add(new Object[]{consultIds.get(i), s1, s2, s3, s4, s5, avg});
         }
         if (!args.isEmpty()) {
             jdbcTemplate.batchUpdate(
@@ -284,6 +297,37 @@ public class OutboundConsultationFactory {
                     args
             );
         }
+    }
+
+    /** 아웃바운드 통화 결과로 기반 만족도를 반환한다 (1~5). */
+    private int baseSatisfactionFromOutbound(String callResult, String outboundCategory) {
+        if ("CONVERTED".equals(callResult)) return 4;
+        if (outboundCategory == null) return 2;
+        return switch (outboundCategory) {
+            case "DISSATISFIED"          -> 1;
+            case "COST", "SWITCH"        -> 2;
+            case "NO_NEED", "CONSIDER"   -> 3;
+            default                      -> 2; // OTHER
+        };
+    }
+
+    /**
+     * 기반 만족도별 응답률 (%).
+     * 만족도가 높을수록 응답률이 낮아진다 (불만족 고객이 더 적극적으로 후기를 남김).
+     */
+    private int satisfactionResponseRate(int base) {
+        return switch (base) {
+            case 1 -> 90;
+            case 2 -> 80;
+            case 3 -> 60;
+            case 4 -> 40;
+            default -> 25; // 5
+        };
+    }
+
+    /** 기반 만족도 중심으로 ±2 범위에서 1~5 점수를 생성한다. */
+    private int satisfactionScore(int base, ThreadLocalRandom random) {
+        return Math.max(1, Math.min(5, base + random.nextInt(5) - 2));
     }
 
     /**
@@ -430,16 +474,45 @@ public class OutboundConsultationFactory {
 
     /**
      * iam_memo — 아웃바운드 통화 결과를 기록한다.
+     * 한글 평문으로 결과를 기술하고 맨 뒤 괄호 안에 카테고리 코드를 표기한다.
      * <ul>
-     *   <li>CONVERTED: {@code CONVERTED - <defenseCategory>}</li>
-     *   <li>REJECTED:  {@code REJECTED - <outboundCategory>}</li>
+     *   <li>CONVERTED: 방어 성공 내용을 한글로 기술 {@code (<defenseCategory>)}</li>
+     *   <li>REJECTED:  거절 사유를 한글로 기술 {@code (<outboundCategory>)}</li>
      * </ul>
      */
     private String buildMemo(OutboundTextResult textResult) {
         if ("CONVERTED".equals(textResult.callResult())) {
-            return "CONVERTED - " + textResult.defenseCategory();
+            return buildConvertedMemo(textResult.defenseCategory());
         }
-        return "REJECTED - " + textResult.outboundCategory();
+        return buildRejectedMemo(textResult.outboundCategory());
+    }
+
+    private String buildConvertedMemo(String defenseCategory) {
+        if (defenseCategory == null) return "상담 결과 고객 전환 성공 (CONVERTED)";
+        return switch (defenseCategory) {
+            case "BNFT_DISCOUNT"    -> "요금 할인 혜택 제안으로 고객 재약정 전환 완료 (BNFT_DISCOUNT)";
+            case "BNFT_GIFT"        -> "사은품 및 추가 혜택 제공으로 고객 유지 성공 (BNFT_GIFT)";
+            case "OPT_DOWNGRADE"    -> "요금제 하향 조정 제안으로 고객 해지 의사 철회 (OPT_DOWNGRADE)";
+            case "PHYS_RELOCATION"  -> "이사 지역 서비스 연계 안내로 고객 전환 완료 (PHYS_RELOCATION)";
+            case "PHYS_TECH_CHECK"  -> "기술 점검 및 품질 개선 조치 후 고객 유지 (PHYS_TECH_CHECK)";
+            case "ADM_GUIDE"        -> "위약금 및 계약 조건 상세 안내 후 고객 동의 확보 (ADM_GUIDE)";
+            case "PLAN_CHANGE"      -> "맞춤형 요금제 변경 제안으로 고객 잔류 (PLAN_CHANGE)";
+            case "CONTRACT_RENEW"   -> "재약정 조건 안내 후 고객 계약 갱신 완료 (CONTRACT_RENEW)";
+            default                 -> "상담 목표 달성, 고객 전환 완료 (" + defenseCategory + ")";
+        };
+    }
+
+    private String buildRejectedMemo(String outboundCategory) {
+        if (outboundCategory == null) return "상담 목표 달성 실패 (REJECTED)";
+        return switch (outboundCategory) {
+            case "COST"        -> "고객 요금 부담 사유로 재약정 거절 (COST)";
+            case "SWITCH"      -> "타사 이동 의사 확고, 해지 방어 실패 (SWITCH)";
+            case "DISSATISFIED"-> "서비스 불만으로 인한 재약정 거절 (DISSATISFIED)";
+            case "NO_NEED"     -> "고객 서비스 필요 없다고 판단하여 거절 (NO_NEED)";
+            case "CONSIDER"    -> "고객 추후 검토 의사 표명, 즉시 전환 미확정 (CONSIDER)";
+            case "OTHER"       -> "기타 사유로 상담 목표 달성 실패 (OTHER)";
+            default            -> "상담 목표 달성 실패 (" + outboundCategory + ")";
+        };
     }
 
     /**
