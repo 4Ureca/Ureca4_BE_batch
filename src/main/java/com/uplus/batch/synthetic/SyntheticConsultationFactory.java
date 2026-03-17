@@ -286,7 +286,7 @@ public class SyntheticConsultationFactory {
         );
 
         // ── 연관 테이블 Bulk INSERT (같은 트랜잭션) ───────────────────────
-        insertClientReviews(consultIds, random);
+        insertClientReviews(consultIds, categoryCodes, random);
         insertCustomerRiskLogs(consultIds, empIds, customerIds, categoryCodes, random);
         insertProductLogs(consultIds, customerIds, categoryCodes, consultCustomers, random);
 
@@ -354,21 +354,31 @@ public class SyntheticConsultationFactory {
     // ─────────────────────────────────────────────────────────
 
     /**
-     * client_review — 고객 만족도 평가 (70% 확률로 생성).
-     * score_1~5: 1~5점 랜덤, score_average: 평균.
+     * client_review — 고객 만족도 평가.
+     *
+     * <p>카테고리(= 상담 원문의 주제)로 기반 만족도를 산출하고,
+     * 기반 만족도가 높을수록 응답률을 낮게 설정한다 (불만족 고객이 더 적극적으로 응답).
+     *
+     * <ul>
+     *   <li>M_CHN / M_TRB → base 2 (불만족 고객)</li>
+     *   <li>M_FEE / M_ETC → base 3 (중립)</li>
+     *   <li>M_ADD / M_DEV → base 4 (긍정적 요청)</li>
+     * </ul>
      */
-    private void insertClientReviews(List<Long> consultIds, ThreadLocalRandom random) {
+    private void insertClientReviews(List<Long> consultIds, List<String> categoryCodes,
+                                     ThreadLocalRandom random) {
         List<Object[]> args = new ArrayList<>();
-        for (Long consultId : consultIds) {
-            if (random.nextInt(100) >= 70) continue; // 30% 미응답
+        for (int i = 0; i < consultIds.size(); i++) {
+            int base = baseSatisfactionFromCategory(categoryCodes.get(i));
+            if (random.nextInt(100) >= satisfactionResponseRate(base)) continue;
 
-            int s1 = 1 + random.nextInt(5);
-            int s2 = 1 + random.nextInt(5);
-            int s3 = 1 + random.nextInt(5);
-            int s4 = 1 + random.nextInt(5);
-            int s5 = 1 + random.nextInt(5);
+            int s1 = satisfactionScore(base, random);
+            int s2 = satisfactionScore(base, random);
+            int s3 = satisfactionScore(base, random);
+            int s4 = satisfactionScore(base, random);
+            int s5 = satisfactionScore(base, random);
             double avg = Math.round((s1 + s2 + s3 + s4 + s5) / 5.0 * 10) / 10.0;
-            args.add(new Object[]{consultId, s1, s2, s3, s4, s5, avg});
+            args.add(new Object[]{consultIds.get(i), s1, s2, s3, s4, s5, avg});
         }
         if (!args.isEmpty()) {
             jdbcTemplate.batchUpdate(
@@ -377,6 +387,32 @@ public class SyntheticConsultationFactory {
                     args
             );
         }
+    }
+
+    /** 카테고리 접두사로 기반 만족도를 반환한다 (1~5). */
+    private int baseSatisfactionFromCategory(String categoryCode) {
+        if (categoryCode.startsWith("M_CHN") || categoryCode.startsWith("M_TRB")) return 2;
+        if (categoryCode.startsWith("M_ADD") || categoryCode.startsWith("M_DEV")) return 4;
+        return 3; // M_FEE, M_ETC
+    }
+
+    /**
+     * 기반 만족도별 응답률 (%).
+     * 만족도가 높을수록 응답률이 낮아진다 (불만족 고객이 더 적극적으로 후기를 남김).
+     */
+    private int satisfactionResponseRate(int base) {
+        return switch (base) {
+            case 1 -> 90;
+            case 2 -> 80;
+            case 3 -> 60;
+            case 4 -> 40;
+            default -> 25; // 5
+        };
+    }
+
+    /** 기반 만족도 중심으로 ±2 범위에서 1~5 점수를 생성한다. */
+    private int satisfactionScore(int base, ThreadLocalRandom random) {
+        return Math.max(1, Math.min(5, base + random.nextInt(5) - 2));
     }
 
     /**
