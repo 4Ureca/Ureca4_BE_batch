@@ -33,9 +33,18 @@ public class RawTextGenerator {
     private static final Map<String, List<List<Turn>>> TEMPLATES = new HashMap<>();
     // 해지 방어 전용 시나리오 (M_CHN 및 15% 오버라이드 시 사용)
     private static final List<List<Turn>> CHURN_TEMPLATES = new ArrayList<>();
+    // 해지 방어 성공/실패 분리 (20% 성공, 80% 실패 비율 제어용)
+    private static final List<List<Turn>> CHURN_FAILURE_TEMPLATES = new ArrayList<>();
+    private static final List<List<Turn>> CHURN_SUCCESS_TEMPLATES = new ArrayList<>();
 
     static {
         buildChurnTemplates();
+        // CHURN-2(index 1), CHURN-5(index 4), CHURN-9(index 8) → 실패 시나리오
+        java.util.Set<Integer> failureIdx = java.util.Set.of(1, 4, 8);
+        for (int i = 0; i < CHURN_TEMPLATES.size(); i++) {
+            if (failureIdx.contains(i)) CHURN_FAILURE_TEMPLATES.add(CHURN_TEMPLATES.get(i));
+            else CHURN_SUCCESS_TEMPLATES.add(CHURN_TEMPLATES.get(i));
+        }
         buildFeeTemplates();
         buildDevTemplates();
         buildTrbTemplates();
@@ -159,7 +168,10 @@ public class RawTextGenerator {
         boolean isChurnOverride  = !isChurnCategory && random.nextInt(100) < 15;
         List<Turn> body;
         if (isChurnCategory || isChurnOverride) {
-            body = CHURN_TEMPLATES.get(random.nextInt(CHURN_TEMPLATES.size()));
+            // 20% 성공, 80% 실패 비율
+            body = (random.nextInt(100) < 80)
+                ? CHURN_FAILURE_TEMPLATES.get(random.nextInt(CHURN_FAILURE_TEMPLATES.size()))
+                : CHURN_SUCCESS_TEMPLATES.get(random.nextInt(CHURN_SUCCESS_TEMPLATES.size()));
         } else {
             List<List<Turn>> variants = TEMPLATES.getOrDefault(categoryCode,
                     TEMPLATES.getOrDefault("M_ETC_04", CHURN_TEMPLATES));

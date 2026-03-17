@@ -98,8 +98,8 @@ public class GeminiExtractor {
 
             [응답 형식]: 반드시 아래 필드만 포함한 JSON 객체들의 '배열'([])로 응답하세요. (순서 엄수)
             {
-              "raw_summary": "상황 → 조치 → 결과 형태의 단 한 문장 요약",
-              "outbound_call_result": "고객 유지 시 CONVERTED, 거절 시 REJECTED",
+              "raw_summary": "반드시 '[상황] 내용 → [조치] 내용 → [결과] 내용' 형식으로 작성 (예: '[상황] 약정 만료 고객 연락 → [조치] 재약정 혜택 제안 → [결과] 고객 수락 및 재약정 완료')",
+              "outbound_call_result": "반드시 'CONVERTED' 또는 'REJECTED' 중 하나만 입력 (다른 값 금지)",
               "outbound_report": "결과에 대한 핵심 요약 1~2문장",
               "outbound_category": "REJECTED인 경우 위 목록 중 '코드명' 하나만 선택 (CONVERTED면 null)"
             }
@@ -128,7 +128,7 @@ public class GeminiExtractor {
 
             [응답 형식]: 반드시 아래 필드만 포함한 JSON 객체들의 '배열'([])로 응답하세요. (순서 엄수)
             {
-              "raw_summary": "상황 → 조치 → 결과 형태의 단 한 문장 요약",
+              "raw_summary": "반드시 '[상황] 내용 → [조치] 내용 → [결과] 내용' 형식으로 작성 (예: '[상황] 약정 만료 고객 연락 → [조치] 재약정 혜택 제안 → [결과] 고객 수락 및 재약정 완료')",
               "has_intent": 고객의 해지/이탈 의사 존재 여부 (boolean),
               "complaint_reason": "고객의 주된 불만 사유 핵심 요약",
               "complaint_category": "위 목록 중 가장 알맞은 '코드명' 1개 선택",
@@ -157,7 +157,7 @@ public class GeminiExtractor {
 
             [응답 형식]: 반드시 아래 필드만 포함한 JSON 객체들의 '배열'([])로 응답하세요. (순서 엄수)
             {
-              "raw_summary": "상황 → 조치 → 결과 형태의 단 한 문장 요약"
+              "raw_summary": "반드시 '[상황] 내용 → [조치] 내용 → [결과] 내용' 형식으로 작성 (예: '[상황] 약정 만료 고객 연락 → [조치] 재약정 혜택 제안 → [결과] 고객 수락 및 재약정 완료')"
             }
 
             [상담 목록]:
