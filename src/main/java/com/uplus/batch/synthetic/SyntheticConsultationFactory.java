@@ -356,8 +356,7 @@ public class SyntheticConsultationFactory {
     /**
      * client_review — 고객 만족도 평가.
      *
-     * <p>카테고리(= 상담 원문의 주제)로 기반 만족도를 산출하고,
-     * 기반 만족도가 높을수록 응답률을 낮게 설정한다 (불만족 고객이 더 적극적으로 응답).
+     * <p>카테고리(= 상담 원문의 주제)로 기반 만족도를 산출한다.
      *
      * <ul>
      *   <li>M_CHN / M_TRB → base 2 (불만족 고객)</li>
@@ -370,8 +369,6 @@ public class SyntheticConsultationFactory {
         List<Object[]> args = new ArrayList<>();
         for (int i = 0; i < consultIds.size(); i++) {
             int base = baseSatisfactionFromCategory(categoryCodes.get(i));
-            if (random.nextInt(100) >= satisfactionResponseRate(base)) continue;
-
             int s1 = satisfactionScore(base, random);
             int s2 = satisfactionScore(base, random);
             int s3 = satisfactionScore(base, random);
@@ -394,20 +391,6 @@ public class SyntheticConsultationFactory {
         if (categoryCode.startsWith("M_CHN") || categoryCode.startsWith("M_TRB")) return 2;
         if (categoryCode.startsWith("M_ADD") || categoryCode.startsWith("M_DEV")) return 4;
         return 3; // M_FEE, M_ETC
-    }
-
-    /**
-     * 기반 만족도별 응답률 (%).
-     * 만족도가 높을수록 응답률이 낮아진다 (불만족 고객이 더 적극적으로 후기를 남김).
-     */
-    private int satisfactionResponseRate(int base) {
-        return switch (base) {
-            case 1 -> 90;
-            case 2 -> 80;
-            case 3 -> 60;
-            case 4 -> 40;
-            default -> 25; // 5
-        };
     }
 
     /** 기반 만족도 중심으로 ±2 범위에서 1~5 점수를 생성한다. */

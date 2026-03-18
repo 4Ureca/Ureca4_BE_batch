@@ -265,8 +265,7 @@ public class OutboundConsultationFactory {
     /**
      * client_review — 고객 만족도 평가.
      *
-     * <p>아웃바운드 통화 결과(= 상담 원문의 결말)로 기반 만족도를 산출하고,
-     * 기반 만족도가 높을수록 응답률을 낮게 설정한다 (불만족 고객이 더 적극적으로 응답).
+     * <p>아웃바운드 통화 결과(= 상담 원문의 결말)로 기반 만족도를 산출한다.
      *
      * <ul>
      *   <li>CONVERTED → base 4 (성공적 결과, 고객 긍정)</li>
@@ -280,8 +279,6 @@ public class OutboundConsultationFactory {
         List<Object[]> args = new ArrayList<>();
         for (int i = 0; i < consultIds.size(); i++) {
             int base = baseSatisfactionFromOutbound(callResults.get(i), outboundCategories.get(i));
-            if (random.nextInt(100) >= satisfactionResponseRate(base)) continue;
-
             int s1 = satisfactionScore(base, random);
             int s2 = satisfactionScore(base, random);
             int s3 = satisfactionScore(base, random);
@@ -308,20 +305,6 @@ public class OutboundConsultationFactory {
             case "COST", "SWITCH"        -> 2;
             case "NO_NEED", "CONSIDER"   -> 3;
             default                      -> 2; // OTHER
-        };
-    }
-
-    /**
-     * 기반 만족도별 응답률 (%).
-     * 만족도가 높을수록 응답률이 낮아진다 (불만족 고객이 더 적극적으로 후기를 남김).
-     */
-    private int satisfactionResponseRate(int base) {
-        return switch (base) {
-            case 1 -> 90;
-            case 2 -> 80;
-            case 3 -> 60;
-            case 4 -> 40;
-            default -> 25; // 5
         };
     }
 
